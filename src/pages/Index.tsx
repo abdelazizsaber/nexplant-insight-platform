@@ -125,7 +125,7 @@ const Index = () => {
               <Button 
                 size="lg" 
                 variant="outline" 
-                className="border-white text-white hover:bg-white hover:text-gray-900 px-8 py-3 text-lg"
+                className="border-white text-black hover:bg-white hover:text-gray-900 px-8 py-3 text-lg bg-white"
               >
                 Learn More
               </Button>
