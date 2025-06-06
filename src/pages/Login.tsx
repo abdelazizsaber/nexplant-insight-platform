@@ -18,10 +18,13 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      // TODO: Replace with actual API call
-      // For now, simulate login with different user roles
       console.log("Login attempt:", { username, password });
       
+      // Simple validation
+      if (!username || !password) {
+        throw new Error("Please fill in all fields");
+      }
+
       // Mock authentication logic based on username
       let userRole = "user";
       if (username === "globaladmin") {
@@ -30,24 +33,30 @@ const Login = () => {
         userRole = "company_admin";
       }
 
-      // Store user info in localStorage (replace with proper auth later)
-      localStorage.setItem("user", JSON.stringify({
+      // Store user info in localStorage
+      const userInfo = {
         username,
         role: userRole,
         company_id: userRole === "global_admin" ? null : 1
-      }));
+      };
+      
+      localStorage.setItem("user", JSON.stringify(userInfo));
+      console.log("User info stored:", userInfo);
 
       toast({
         title: "Login successful",
         description: `Welcome back, ${username}!`,
       });
 
-      // Redirect to dashboard
-      navigate("/dashboard");
+      // Force navigation to dashboard
+      console.log("Navigating to dashboard...");
+      navigate("/dashboard", { replace: true });
+      
     } catch (error) {
+      console.error("Login error:", error);
       toast({
         title: "Login failed",
-        description: "Invalid username or password. Please try again.",
+        description: error instanceof Error ? error.message : "Invalid username or password. Please try again.",
         variant: "destructive",
       });
     } finally {
