@@ -14,20 +14,46 @@ interface User {
 
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState("dashboard");
 
   useEffect(() => {
+    console.log("Dashboard component mounted");
+    
     // Check if user is logged in
     const storedUser = localStorage.getItem("user");
+    console.log("Stored user data:", storedUser);
+    
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        console.log("Parsed user:", parsedUser);
+        setUser(parsedUser);
+      } catch (error) {
+        console.error("Error parsing user data:", error);
+        localStorage.removeItem("user");
+      }
+    } else {
+      console.log("No user data found in localStorage");
     }
+    
+    setLoading(false);
   }, []);
+
+  console.log("Dashboard render - user:", user, "loading:", loading);
+
+  // Show loading while checking authentication
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
 
   // Redirect to login if not authenticated
   if (!user) {
+    console.log("No user found, redirecting to login");
     return <Navigate to="/login" replace />;
   }
+
+  console.log("Rendering dashboard for user:", user);
 
   return (
     <SidebarProvider>
