@@ -18,37 +18,43 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      console.log("Login attempt:", { username, password });
+      console.log("Login attempt:", { username });
       
       // Simple validation
       if (!username || !password) {
         throw new Error("Please fill in all fields");
       }
 
-      // Mock authentication logic based on username
-      let userRole = "user";
-      if (username === "globaladmin") {
-        userRole = "global_admin";
-      } else if (username === "companyadmin") {
-        userRole = "company_admin";
+      // Call Flask backend login endpoint
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username,
+          password
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Login failed');
       }
 
-      // Store user info in localStorage
-      const userInfo = {
-        username,
-        role: userRole,
-        company_id: userRole === "global_admin" ? null : 1
-      };
-      
-      localStorage.setItem("user", JSON.stringify(userInfo));
-      console.log("User info stored:", userInfo);
+      const userData = await response.json();
+      console.log("Login successful:", userData);
+
+      // Store user info and token in localStorage
+      localStorage.setItem("user", JSON.stringify(userData.user));
+      localStorage.setItem("token", userData.token);
 
       toast({
         title: "Login successful",
         description: `Welcome back, ${username}!`,
       });
 
-      // Force navigation to dashboard
+      // Navigate to dashboard
       console.log("Navigating to dashboard...");
       navigate("/dashboard", { replace: true });
       
@@ -143,16 +149,6 @@ const Login = () => {
               {isLoading ? "Signing in..." : "Sign in"}
             </Button>
           </form>
-
-          {/* Demo Credentials */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm font-medium text-gray-700 mb-2">Demo Credentials:</p>
-            <div className="space-y-1 text-xs text-gray-600">
-              <p><strong>Global Admin:</strong> globaladmin / password</p>
-              <p><strong>Company Admin:</strong> companyadmin / password</p>
-              <p><strong>User:</strong> user / password</p>
-            </div>
-          </div>
         </div>
       </div>
 

@@ -2,6 +2,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Building2, Users, Monitor, Wifi, WifiOff } from "lucide-react";
+import { useEffect, useState } from "react";
+import { apiClient } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface User {
   username: string;
@@ -14,32 +17,101 @@ interface DashboardContentProps {
   currentView: string;
 }
 
-// Mock data for demonstration
-const mockCompanies = [
-  { id: 1, name: "Acme Manufacturing", devices: 45, users: 12, status: "active" },
-  { id: 2, name: "TechCorp Industries", devices: 32, users: 8, status: "active" },
-  { id: 3, name: "Global Automation", devices: 67, users: 15, status: "active" }
-];
+interface Company {
+  id: string;
+  name: string;
+  status: string;
+  device_count?: number;
+  user_count?: number;
+}
 
-const mockUsers = [
-  { id: 1, username: "john.doe", role: "user", company: "Acme Manufacturing", lastConnection: "2 hours ago", status: "online" },
-  { id: 2, username: "jane.smith", role: "company_admin", company: "TechCorp Industries", lastConnection: "5 minutes ago", status: "online" },
-  { id: 3, username: "mike.wilson", role: "user", company: "Global Automation", lastConnection: "1 day ago", status: "offline" }
-];
+interface Device {
+  id: string;
+  name: string;
+  device_id: string;
+  device_type: string;
+  company_name?: string;
+  status: string;
+  last_data?: string;
+}
 
-const mockDevices = [
-  { id: 1, name: "Temperature Sensor 01", type: "sensor", company: "Acme Manufacturing", status: "online", lastData: "2 minutes ago" },
-  { id: 2, name: "Pressure Monitor 02", type: "monitor", company: "TechCorp Industries", status: "online", lastData: "1 minute ago" },
-  { id: 3, name: "Flow Controller 03", type: "controller", company: "Global Automation", status: "offline", lastData: "3 hours ago" }
-];
-
-const mockMachines = [
-  { id: 1, name: "Production Line A", devices: 8, status: "running", efficiency: 94 },
-  { id: 2, name: "Assembly Unit B", devices: 5, status: "maintenance", efficiency: 0 },
-  { id: 3, name: "Quality Control C", devices: 3, status: "running", efficiency: 87 }
-];
+interface UserData {
+  id: number;
+  username: string;
+  role: string;
+  company_name?: string;
+  status: string;
+  last_connection?: string;
+}
 
 export function DashboardContent({ user, currentView }: DashboardContentProps) {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [users, setUsers] = useState<UserData[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchData();
+  }, [currentView, user]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      switch (currentView) {
+        case "companies":
+          if (user.role === "global_admin") {
+            const companiesData = await apiClient.getCompanies();
+            setCompanies(companiesData);
+          }
+          break;
+        case "users":
+        case "all-users":
+          const usersData = await apiClient.getUsers(
+            user.role === "global_admin" ? undefined : user.company_id?.toString()
+          );
+          setUsers(usersData);
+          break;
+        case "devices":
+        case "all-devices":
+          const devicesData = await apiClient.getDevices(
+            user.role === "global_admin" ? undefined : user.company_id?.toString()
+          );
+          setDevices(devicesData);
+          break;
+        case "dashboard":
+          // Fetch summary data for dashboard
+          if (user.role === "global_admin") {
+            const [companiesData, usersData, devicesData] = await Promise.all([
+              apiClient.getCompanies(),
+              apiClient.getUsers(),
+              apiClient.getDevices()
+            ]);
+            setCompanies(companiesData);
+            setUsers(usersData);
+            setDevices(devicesData);
+          } else {
+            const [usersData, devicesData] = await Promise.all([
+              apiClient.getUsers(user.company_id?.toString()),
+              apiClient.getDevices(user.company_id?.toString())
+            ]);
+            setUsers(usersData);
+            setDevices(devicesData);
+          }
+          break;
+      }
+    } catch (error) {
+      console.error("Error fetching data:", error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch data from server",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderDashboard = () => {
     if (user.role === "global_admin") {
       return (
@@ -51,7 +123,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Building2 className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{mockCompanies.length}</div>
+                <div className="text-2xl font-bold">{companies.length}</div>
                 <p className="text-xs text-muted-foreground">Active companies</p>
               </CardContent>
             </Card>
@@ -61,7 +133,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{mockUsers.length}</div>
+                <div className="text-2xl font-bold">{users.length}</div>
                 <p className="text-xs text-muted-foreground">Registered users</p>
               </CardContent>
             </Card>
@@ -71,7 +143,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Monitor className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{mockDevices.length}</div>
+                <div className="text-2xl font-bold">{devices.length}</div>
                 <p className="text-xs text-muted-foreground">Connected devices</p>
               </CardContent>
             </Card>
@@ -91,17 +163,21 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
     }
 
     // Company admin and user dashboard
+    const connectedDevices = devices.filter(d => d.status === "connected").length;
+    const totalDevices = devices.length;
+    const activeUsers = users.filter(u => u.status === "active").length;
+
     return (
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Machines</CardTitle>
-              <Monitor className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{mockMachines.length}</div>
-              <p className="text-xs text-muted-foreground">Total machines</p>
+              <div className="text-2xl font-bold">{activeUsers}</div>
+              <p className="text-xs text-muted-foreground">Active users</p>
             </CardContent>
           </Card>
           <Card>
@@ -110,18 +186,18 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               <Monitor className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">16</div>
-              <p className="text-xs text-muted-foreground">Connected devices</p>
+              <div className="text-2xl font-bold">{totalDevices}</div>
+              <p className="text-xs text-muted-foreground">Total devices</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Efficiency</CardTitle>
+              <CardTitle className="text-sm font-medium">Connected</CardTitle>
               <Wifi className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">91%</div>
-              <p className="text-xs text-muted-foreground">Average OEE</p>
+              <div className="text-2xl font-bold text-green-600">{connectedDevices}</div>
+              <p className="text-xs text-muted-foreground">Online devices</p>
             </CardContent>
           </Card>
           <Card>
@@ -130,14 +206,22 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               <WifiOff className="h-4 w-4 text-orange-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-orange-600">2</div>
-              <p className="text-xs text-muted-foreground">Active alerts</p>
+              <div className="text-2xl font-bold text-orange-600">{totalDevices - connectedDevices}</div>
+              <p className="text-xs text-muted-foreground">Offline devices</p>
             </CardContent>
           </Card>
         </div>
       </div>
     );
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     switch (currentView) {
@@ -155,17 +239,21 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               </Button>
             </div>
             <div className="grid gap-4">
-              {mockCompanies.map((company) => (
+              {companies.map((company) => (
                 <Card key={company.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       {company.name}
-                      <span className="text-sm font-normal text-green-600 bg-green-100 px-2 py-1 rounded">
+                      <span className={`text-sm font-normal px-2 py-1 rounded ${
+                        company.status === "active" 
+                          ? "text-green-600 bg-green-100" 
+                          : "text-red-600 bg-red-100"
+                      }`}>
                         {company.status}
                       </span>
                     </CardTitle>
                     <CardDescription>
-                      {company.devices} devices • {company.users} users
+                      ID: {company.id} • {company.device_count || 0} devices • {company.user_count || 0} users
                     </CardDescription>
                   </CardHeader>
                 </Card>
@@ -188,14 +276,14 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               )}
             </div>
             <div className="grid gap-4">
-              {mockUsers.map((userData) => (
+              {users.map((userData) => (
                 <Card key={userData.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       {userData.username}
                       <div className="flex items-center gap-2">
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          userData.status === "online" 
+                          userData.status === "active" 
                             ? "text-green-600 bg-green-100" 
                             : "text-gray-600 bg-gray-100"
                         }`}>
@@ -204,7 +292,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                       </div>
                     </CardTitle>
                     <CardDescription>
-                      {userData.role.replace('_', ' ')} • {userData.company} • Last seen: {userData.lastConnection}
+                      {userData.role.replace('_', ' ')} • {userData.company_name} • Last seen: {userData.last_connection || 'Never'}
                     </CardDescription>
                   </CardHeader>
                 </Card>
@@ -225,19 +313,19 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               </Button>
             </div>
             <div className="grid gap-4">
-              {mockDevices.map((device) => (
+              {devices.map((device) => (
                 <Card key={device.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       {device.name}
                       <div className="flex items-center gap-2">
-                        {device.status === "online" ? (
+                        {device.status === "connected" ? (
                           <Wifi className="h-4 w-4 text-green-600" />
                         ) : (
                           <WifiOff className="h-4 w-4 text-red-600" />
                         )}
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          device.status === "online" 
+                          device.status === "connected" 
                             ? "text-green-600 bg-green-100" 
                             : "text-red-600 bg-red-100"
                         }`}>
@@ -246,7 +334,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                       </div>
                     </CardTitle>
                     <CardDescription>
-                      {device.type} • {device.company} • Last data: {device.lastData}
+                      {device.device_type} • ID: {device.device_id} • {device.company_name} • Last data: {device.last_data || 'Never'}
                     </CardDescription>
                   </CardHeader>
                 </Card>
@@ -268,23 +356,23 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               )}
             </div>
             <div className="grid gap-4">
-              {mockMachines.map((machine) => (
-                <Card key={machine.id}>
+              {devices.map((device) => (
+                <Card key={device.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      {machine.name}
+                      {device.name}
                       <div className="flex items-center gap-2">
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          machine.status === "running" 
+                          device.status === "connected" 
                             ? "text-green-600 bg-green-100" 
                             : "text-orange-600 bg-orange-100"
                         }`}>
-                          {machine.status}
+                          {device.status}
                         </span>
                       </div>
                     </CardTitle>
                     <CardDescription>
-                      {machine.devices} devices • Efficiency: {machine.efficiency}%
+                      Type: {device.device_type} • ID: {device.device_id}
                     </CardDescription>
                   </CardHeader>
                 </Card>
