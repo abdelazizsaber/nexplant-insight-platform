@@ -61,7 +61,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
       switch (currentView) {
         case "companies":
           if (user.role === "global_admin") {
-            const companiesData = await apiClient.getCompanies();
+            const companiesData = await apiClient.getCompanies() as Company[];
             setCompanies(companiesData);
           }
           break;
@@ -69,31 +69,31 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
         case "all-users":
           const usersData = await apiClient.getUsers(
             user.role === "global_admin" ? undefined : user.company_id?.toString()
-          );
+          ) as UserData[];
           setUsers(usersData);
           break;
         case "devices":
         case "all-devices":
           const devicesData = await apiClient.getDevices(
             user.role === "global_admin" ? undefined : user.company_id?.toString()
-          );
+          ) as Device[];
           setDevices(devicesData);
           break;
         case "dashboard":
           // Fetch summary data for dashboard
           if (user.role === "global_admin") {
             const [companiesData, usersData, devicesData] = await Promise.all([
-              apiClient.getCompanies(),
-              apiClient.getUsers(),
-              apiClient.getDevices()
+              apiClient.getCompanies() as Promise<Company[]>,
+              apiClient.getUsers() as Promise<UserData[]>,
+              apiClient.getDevices() as Promise<Device[]>
             ]);
             setCompanies(companiesData);
             setUsers(usersData);
             setDevices(devicesData);
           } else {
             const [usersData, devicesData] = await Promise.all([
-              apiClient.getUsers(user.company_id?.toString()),
-              apiClient.getDevices(user.company_id?.toString())
+              apiClient.getUsers(user.company_id?.toString()) as Promise<UserData[]>,
+              apiClient.getDevices(user.company_id?.toString()) as Promise<Device[]>
             ]);
             setUsers(usersData);
             setDevices(devicesData);
@@ -384,6 +384,109 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
       default:
         return renderDashboard();
     }
+  };
+
+  const renderDashboard = () => {
+    if (user.role === "global_admin") {
+      return (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Companies</CardTitle>
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{companies.length}</div>
+                <p className="text-xs text-muted-foreground">Active companies</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{users.length}</div>
+                <p className="text-xs text-muted-foreground">Registered users</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Devices</CardTitle>
+                <Monitor className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{devices.length}</div>
+                <p className="text-xs text-muted-foreground">Connected devices</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">System Health</CardTitle>
+                <Wifi className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">98%</div>
+                <p className="text-xs text-muted-foreground">Uptime</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
+    // Company admin and user dashboard
+    const connectedDevices = devices.filter(d => d.status === "connected").length;
+    const totalDevices = devices.length;
+    const activeUsers = users.filter(u => u.status === "active").length;
+
+    return (
+      <div className="space-y-6">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{activeUsers}</div>
+              <p className="text-xs text-muted-foreground">Active users</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Devices</CardTitle>
+              <Monitor className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalDevices}</div>
+              <p className="text-xs text-muted-foreground">Total devices</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Connected</CardTitle>
+              <Wifi className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">{connectedDevices}</div>
+              <p className="text-xs text-muted-foreground">Online devices</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Alerts</CardTitle>
+              <WifiOff className="h-4 w-4 text-orange-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">{totalDevices - connectedDevices}</div>
+              <p className="text-xs text-muted-foreground">Offline devices</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   };
 
   return (
