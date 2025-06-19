@@ -13,6 +13,10 @@ interface User {
   company_id: number | null;
 }
 
+interface SessionResponse {
+  user: User;
+}
+
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,7 +34,7 @@ const Dashboard = () => {
       console.log("Checking user session...");
       
       // Check with backend if session is valid
-      const sessionData = await apiClient.checkSession();
+      const sessionData = await apiClient.checkSession() as SessionResponse;
       console.log("Session data:", sessionData);
       
       if (sessionData && sessionData.user) {
