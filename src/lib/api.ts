@@ -9,20 +9,23 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const token = localStorage.getItem('token');
-    
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
         ...options.headers,
       },
+      credentials: 'include', // Include session cookies
       ...options,
     };
 
     const response = await fetch(`${this.baseUrl}${endpoint}`, config);
 
     if (!response.ok) {
+      if (response.status === 401) {
+        // Session expired, redirect to login
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
     }
@@ -41,6 +44,12 @@ class ApiClient {
   async logout() {
     return this.request('/api/auth/logout', {
       method: 'POST',
+    });
+  }
+
+  async checkSession() {
+    return this.request('/api/auth/check', {
+      method: 'GET',
     });
   }
 
@@ -105,6 +114,32 @@ class ApiClient {
     if (params.toString()) endpoint += `?${params.toString()}`;
     
     return this.request(endpoint);
+  }
+
+  // Create user endpoint
+  async createUser(userData: {
+    username: string;
+    password: string;
+    company_id: string;
+    role: string;
+  }) {
+    return this.request('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  // Create entity endpoint
+  async createEntity(entityData: {
+    company_id: string;
+    entity_name: string;
+    entity_location: string;
+    entity_description?: string;
+  }) {
+    return this.request('/api/entities', {
+      method: 'POST',
+      body: JSON.stringify(entityData),
+    });
   }
 }
 

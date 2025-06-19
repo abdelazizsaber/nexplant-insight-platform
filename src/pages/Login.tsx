@@ -25,12 +25,13 @@ const Login = () => {
         throw new Error("Please fill in all fields");
       }
 
-      // Call Flask backend login endpoint
+      // Call Flask backend login endpoint with credentials
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include', // Important for sessions
         body: JSON.stringify({
           username,
           password
@@ -45,9 +46,8 @@ const Login = () => {
       const userData = await response.json();
       console.log("Login successful:", userData);
 
-      // Store user info and token in localStorage
+      // Store user info in localStorage (session is handled by Flask)
       localStorage.setItem("user", JSON.stringify(userData.user));
-      localStorage.setItem("token", userData.token);
 
       toast({
         title: "Login successful",

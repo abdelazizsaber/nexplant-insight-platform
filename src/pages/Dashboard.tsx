@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { DashboardContent } from "@/components/DashboardContent";
+import { apiClient } from "@/lib/api";
 
 interface User {
   username: string;
@@ -20,31 +21,54 @@ const Dashboard = () => {
   useEffect(() => {
     console.log("Dashboard component mounted");
     
-    // Check if user is logged in
-    const storedUser = localStorage.getItem("user");
-    console.log("Stored user data:", storedUser);
-    
-    if (storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        console.log("Parsed user:", parsedUser);
-        setUser(parsedUser);
-      } catch (error) {
-        console.error("Error parsing user data:", error);
-        localStorage.removeItem("user");
-      }
-    } else {
-      console.log("No user data found in localStorage");
-    }
-    
-    setLoading(false);
+    // Check session with backend
+    checkUserSession();
   }, []);
+
+  const checkUserSession = async () => {
+    try {
+      console.log("Checking user session...");
+      
+      // Check with backend if session is valid
+      const sessionData = await apiClient.checkSession();
+      console.log("Session data:", sessionData);
+      
+      if (sessionData && sessionData.user) {
+        setUser(sessionData.user);
+        // Also store in localStorage for quick access
+        localStorage.setItem("user", JSON.stringify(sessionData.user));
+      } else {
+        // Try to get from localStorage if session check fails
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            setUser(parsedUser);
+          } catch (error) {
+            console.error("Error parsing stored user data:", error);
+            localStorage.removeItem("user");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Session check failed:", error);
+      // Clear any stored user data
+      localStorage.removeItem("user");
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   console.log("Dashboard render - user:", user, "loading:", loading);
 
   // Show loading while checking authentication
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg">Loading...</div>
+      </div>
+    );
   }
 
   // Redirect to login if not authenticated

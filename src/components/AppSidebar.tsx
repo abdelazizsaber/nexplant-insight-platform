@@ -14,6 +14,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface User {
   username: string;
@@ -29,10 +31,22 @@ interface AppSidebarProps {
 
 export function AppSidebar({ user, currentView, setCurrentView }: AppSidebarProps) {
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/login");
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout();
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      // Clear local storage and redirect regardless of API call result
+      localStorage.removeItem("user");
+      toast({
+        title: "Logged out",
+        description: "You have been successfully logged out.",
+      });
+      navigate("/login");
+    }
   };
 
   const getMenuItems = () => {
