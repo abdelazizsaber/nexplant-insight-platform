@@ -26,12 +26,12 @@ const Login = () => {
         throw new Error("Please fill in all fields");
       }
 
-      // Use apiClient instead of direct fetch
-      const userData = await apiClient.login(username, password);
-      console.log("Login successful:", userData);
+      // Use apiClient with proper typing
+      const loginResponse = await apiClient.login(username, password);
+      console.log("Login successful:", loginResponse);
 
       // Store user info in localStorage (session is handled by Flask)
-      localStorage.setItem("user", JSON.stringify(userData.user));
+      localStorage.setItem("user", JSON.stringify(loginResponse.user));
 
       toast({
         title: "Login successful",

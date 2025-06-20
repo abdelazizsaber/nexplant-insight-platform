@@ -1,4 +1,23 @@
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+// Type definitions for API responses
+interface LoginResponse {
+  user: {
+    username: string;
+    role: string;
+    company_id: number | null;
+  };
+  message: string;
+}
+
+interface SessionResponse {
+  user: {
+    username: string;
+    role: string;
+    company_id: number | null;
+  };
+}
 
 class ApiClient {
   private baseUrl: string;
@@ -33,8 +52,8 @@ class ApiClient {
   }
 
   // Authentication endpoints
-  async login(username: string, password: string) {
-    return this.request('/api/auth/login', {
+  async login(username: string, password: string): Promise<LoginResponse> {
+    return this.request<LoginResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     });
@@ -46,8 +65,8 @@ class ApiClient {
     });
   }
 
-  async checkSession() {
-    return this.request('/api/auth/check', {
+  async checkSession(): Promise<SessionResponse> {
+    return this.request<SessionResponse>('/api/auth/check', {
       method: 'GET',
     });
   }
