@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
 const Login = () => {
   const [username, setUsername] = useState("");
@@ -25,25 +26,8 @@ const Login = () => {
         throw new Error("Please fill in all fields");
       }
 
-      // Call Flask backend login endpoint with credentials
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Important for sessions
-        body: JSON.stringify({
-          username,
-          password
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Login failed');
-      }
-
-      const userData = await response.json();
+      // Use apiClient instead of direct fetch
+      const userData = await apiClient.login(username, password);
       console.log("Login successful:", userData);
 
       // Store user info in localStorage (session is handled by Flask)
@@ -60,9 +44,23 @@ const Login = () => {
       
     } catch (error) {
       console.error("Login error:", error);
+      
+      // Better error handling for different error types
+      let errorMessage = "An unexpected error occurred. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("fetch")) {
+          errorMessage = "Unable to connect to server. Please ensure the backend is running.";
+        } else if (error.message.includes("JSON")) {
+          errorMessage = "Server response error. Please check if the backend is properly configured.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       toast({
         title: "Login failed",
-        description: error instanceof Error ? error.message : "Invalid username or password. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
