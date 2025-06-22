@@ -92,7 +92,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           setUserCount(userCountData.total_users || 0);
 
           if (user.role === "global_admin") {
-            const companiesData = await apiClient.getCompanies() as Promise<Company[]>;
+            const companiesData = await apiClient.getCompanies()
             setCompanies(companiesData);
           }
           break;
