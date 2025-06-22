@@ -1,3 +1,4 @@
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Building2, Users, Monitor, Wifi, WifiOff } from "lucide-react";
@@ -49,8 +50,6 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [deviceCount, setDeviceCount] = useState(0);
-  const [userCount, setUserCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -83,17 +82,23 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           setDevices(devicesData);
           break;
         case "dashboard":
-          // Fetch summary data for dashboard using new APIs
-          const [deviceCountData, userCountData] = await Promise.all([
-            apiClient.getNoDevices() as Promise<{total_devices: number}>,
-            apiClient.getNoUsers() as Promise<{total_users: number}>
-          ]);
-          setDeviceCount(deviceCountData.total_devices || 0);
-          setUserCount(userCountData.total_users || 0);
-
+          // Fetch all data for dashboard
           if (user.role === "global_admin") {
-            const companiesData = await apiClient.getCompanies()
+            const [companiesData, usersData, devicesData] = await Promise.all([
+              apiClient.getCompanies() as Promise<Company[]>,
+              apiClient.getUsers() as Promise<UserData[]>,
+              apiClient.getDevices() as Promise<Device[]>
+            ]);
             setCompanies(companiesData);
+            setUsers(usersData);
+            setDevices(devicesData);
+          } else {
+            const [usersData, devicesData] = await Promise.all([
+              apiClient.getUsers(user.company_id?.toString()) as Promise<UserData[]>,
+              apiClient.getDevices(user.company_id?.toString()) as Promise<Device[]>
+            ]);
+            setUsers(usersData);
+            setDevices(devicesData);
           }
           break;
       }
@@ -130,7 +135,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{userCount}</div>
+                <div className="text-2xl font-bold">{users.length}</div>
                 <p className="text-xs text-muted-foreground">Registered users</p>
               </CardContent>
             </Card>
@@ -140,7 +145,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Monitor className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{deviceCount}</div>
+                <div className="text-2xl font-bold">{devices.length}</div>
                 <p className="text-xs text-muted-foreground">Connected devices</p>
               </CardContent>
             </Card>
@@ -161,7 +166,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
 
     // Company admin and user dashboard
     const connectedDevices = devices.filter(d => d.status === "connected").length;
-    const totalDevices = deviceCount;
+    const totalDevices = devices.length;
     const activeUsers = users.filter(u => u.status === "active").length;
 
     return (
@@ -173,7 +178,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{userCount}</div>
+              <div className="text-2xl font-bold">{users.length}</div>
               <p className="text-xs text-muted-foreground">Active users</p>
             </CardContent>
           </Card>
