@@ -1,3 +1,4 @@
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // Type definitions for API responses
@@ -119,8 +120,13 @@ class ApiClient {
     return this.request(endpoint);
   }
 
-  async getDeviceCount() {
-    return this.request('/api/devices');
+  // New endpoints for counts
+  async getNoDevices() {
+    return this.request('/api/get_no_devices');
+  }
+
+  async getNoUsers() {
+    return this.request('/api/get_no_users');
   }
 
   async getEntities(companyId: string) {

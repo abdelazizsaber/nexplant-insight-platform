@@ -50,6 +50,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
   const [users, setUsers] = useState<UserData[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [deviceCount, setDeviceCount] = useState(0);
+  const [userCount, setUserCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -82,23 +83,17 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           setDevices(devicesData);
           break;
         case "dashboard":
-          // Fetch summary data for dashboard
+          // Fetch summary data for dashboard using new APIs
+          const [deviceCountData, userCountData] = await Promise.all([
+            apiClient.getNoDevices() as Promise<{total_devices: number}>,
+            apiClient.getNoUsers() as Promise<{total_users: number}>
+          ]);
+          setDeviceCount(deviceCountData.total_devices || 0);
+          setUserCount(userCountData.total_users || 0);
+
           if (user.role === "global_admin") {
-            const [companiesData, usersData, deviceCountData] = await Promise.all([
-              apiClient.getCompanies() as Promise<Company[]>,
-              apiClient.getUsers() as Promise<UserData[]>,
-              apiClient.getDeviceCount() as Promise<{total_devices: number}>
-            ]);
+            const companiesData = await apiClient.getCompanies() as Promise<Company[]>;
             setCompanies(companiesData);
-            setUsers(usersData);
-            setDeviceCount(deviceCountData.total_devices || 0);
-          } else {
-            const [usersData, deviceCountData] = await Promise.all([
-              apiClient.getUsers(user.company_id?.toString()) as Promise<UserData[]>,
-              apiClient.getDeviceCount() as Promise<{total_devices: number}>
-            ]);
-            setUsers(usersData);
-            setDeviceCount(deviceCountData.total_devices || 0);
           }
           break;
       }
@@ -135,7 +130,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{users.length}</div>
+                <div className="text-2xl font-bold">{userCount}</div>
                 <p className="text-xs text-muted-foreground">Registered users</p>
               </CardContent>
             </Card>
@@ -178,7 +173,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{activeUsers}</div>
+              <div className="text-2xl font-bold">{userCount}</div>
               <p className="text-xs text-muted-foreground">Active users</p>
             </CardContent>
           </Card>
