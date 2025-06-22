@@ -119,6 +119,10 @@ class ApiClient {
     return this.request(endpoint);
   }
 
+  async getDeviceCount() {
+    return this.request('/api/devices');
+  }
+
   async getEntities(companyId: string) {
     return this.request(`/api/entities?company_id=${companyId}`);
   }

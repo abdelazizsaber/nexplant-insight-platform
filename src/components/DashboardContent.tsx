@@ -1,10 +1,11 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Building2, Users, Monitor, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { CreateCompanyForm } from "./CreateCompanyForm";
+import { RegisterDeviceForm } from "./RegisterDeviceForm";
 
 interface User {
   username: string;
@@ -48,6 +49,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [deviceCount, setDeviceCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -82,21 +84,21 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
         case "dashboard":
           // Fetch summary data for dashboard
           if (user.role === "global_admin") {
-            const [companiesData, usersData, devicesData] = await Promise.all([
+            const [companiesData, usersData, deviceCountData] = await Promise.all([
               apiClient.getCompanies() as Promise<Company[]>,
               apiClient.getUsers() as Promise<UserData[]>,
-              apiClient.getDevices() as Promise<Device[]>
+              apiClient.getDeviceCount() as Promise<{total_devices: number}>
             ]);
             setCompanies(companiesData);
             setUsers(usersData);
-            setDevices(devicesData);
+            setDeviceCount(deviceCountData.total_devices || 0);
           } else {
-            const [usersData, devicesData] = await Promise.all([
+            const [usersData, deviceCountData] = await Promise.all([
               apiClient.getUsers(user.company_id?.toString()) as Promise<UserData[]>,
-              apiClient.getDevices(user.company_id?.toString()) as Promise<Device[]>
+              apiClient.getDeviceCount() as Promise<{total_devices: number}>
             ]);
             setUsers(usersData);
-            setDevices(devicesData);
+            setDeviceCount(deviceCountData.total_devices || 0);
           }
           break;
       }
@@ -143,7 +145,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Monitor className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{devices.length}</div>
+                <div className="text-2xl font-bold">{deviceCount}</div>
                 <p className="text-xs text-muted-foreground">Connected devices</p>
               </CardContent>
             </Card>
@@ -164,7 +166,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
 
     // Company admin and user dashboard
     const connectedDevices = devices.filter(d => d.status === "connected").length;
-    const totalDevices = devices.length;
+    const totalDevices = deviceCount;
     const activeUsers = users.filter(u => u.status === "active").length;
 
     return (
@@ -233,10 +235,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold">Companies</h2>
-              <Button className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Company
-              </Button>
+              <CreateCompanyForm onCompanyCreated={fetchData} />
             </div>
             <div className="grid gap-4">
               {companies.map((company) => (
@@ -307,10 +306,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold">Devices</h2>
-              <Button className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Register Device
-              </Button>
+              <RegisterDeviceForm user={user} onDeviceRegistered={fetchData} />
             </div>
             <div className="grid gap-4">
               {devices.map((device) => (
@@ -349,10 +345,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold">Machines</h2>
               {user.role === "company_admin" && (
-                <Button className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Machine
-                </Button>
+                <RegisterDeviceForm user={user} onDeviceRegistered={fetchData} />
               )}
             </div>
             <div className="grid gap-4">
