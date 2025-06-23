@@ -19,7 +19,7 @@ app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'  # Change
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session expires in 8 hours
 
 # Enable CORS with credentials
-CORS(app, supports_credentials=True, origins=['http://localhost:5173'])  # Adjust origin as needed
+CORS(app, supports_credentials=True, origins=['http://192.168.0.87'])  # Adjust origin as needed
 
 MASTER_DB_CONFIG = {
     'host': 'localhost',
@@ -57,9 +57,9 @@ def session_required(f):
         try:
             user = session['user']
             if user.get('role') == 'global_admin':
-                cur.execute("SELECT * FROM global_admin WHERE username=%s AND status='Active'", (user['username'],))
+                cur.execute("SELECT * FROM global_admin WHERE username=%s", (user['username'],))
             else:
-                cur.execute("SELECT * FROM users WHERE username=%s AND company_id=%s AND status='Active'", 
+                cur.execute("SELECT * FROM users WHERE username=%s AND company_id=%s", 
                           (user['username'], user['company_id']))
             
             current_user = cur.fetchone()
@@ -116,7 +116,7 @@ def create_company_database_schema(company_id):
                 device_id VARCHAR(255) UNIQUE NOT NULL,
                 device_type VARCHAR(100) NOT NULL,
                 device_description TEXT,
-                device_status ENUM('connected', 'not_connected') DEFAULT 'not_connected',
+                device_status ENUM('online', 'offline') DEFAULT 'offline',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
             )
@@ -239,7 +239,7 @@ def login():
 
     try:
         # First check if it's a global admin
-        cur.execute("SELECT * FROM global_admin WHERE username=%s AND status='Active'", (username,))
+        cur.execute("SELECT * FROM global_admin WHERE username=%s", (username,))
         user = cur.fetchone()
         
         if user and check_password_hash(user['password'], password):
@@ -265,12 +265,12 @@ def login():
             }), 200
 
         # Check regular users
-        cur.execute("SELECT * FROM users WHERE username=%s AND status='Active'", (username,))
+        cur.execute("SELECT * FROM users WHERE username=%s", (username,))
         user = cur.fetchone()
         
         if user and check_password_hash(user['password'], password):
             # Check if company is active
-            cur.execute("SELECT status FROM companies WHERE company_id=%s", (user['company_id'],))
+            cur.execute("SELECT company_status FROM companies WHERE company_id=%s", (user['company_id'],))
             company = cur.fetchone()
             
             if not company or company['status'] != 'Active':
@@ -300,6 +300,8 @@ def login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -338,36 +340,36 @@ def create_company():
 
     try:
         # Check if company name already exists
-        cur.execute("SELECT * FROM companies WHERE name=%s", (name,))
+        cur.execute("SELECT * FROM companies WHERE company_name=%s", (name,))
         if cur.fetchone():
             return jsonify({"error": "Company name already exists"}), 409
 
         # Insert company
         cur.execute("""
-            INSERT INTO companies (name, company_id, email, country_code, description, status) 
-            VALUES (%s, %s, %s, %s, %s, 'Active')
-        """, (name, company_id, email, country_code, description))
+            INSERT INTO companies (company_id, company_name, company_desc, company_status) 
+            VALUES (%s, %s, %s, %s)
+        """, (company_id, name, description, 'Active'))
 
         # Create company admin user
         cur.execute("""
             INSERT INTO users (username, password, company_id, role, status) 
-            VALUES (%s, %s, %s, 'company_admin', 'Active')
-        """, (email, hashed_password, company_id))
+            VALUES (%s, %s, %s, %s, %s)
+        """, (email, hashed_password, company_id, 'company_admin', 'Offline'))
 
         conn.commit()
 
         # Create company database
         cur.execute(f"CREATE DATABASE `{company_id}`")
-        conn.commit()
+        #conn.commit()
 
         # Create database schema
         create_company_database_schema(company_id)
         
         # Generate MQTT script
-        script_path = generate_mqtt_listener_script(company_id)
+        #script_path = generate_mqtt_listener_script(company_id)
         
         # Send welcome email
-        send_welcome_email(email, company_id, password)
+        #send_welcome_email(email, company_id, password)
 
         return jsonify({
             "message": "Company created successfully",
@@ -445,7 +447,7 @@ def deactivate_company():
     try:
         # Deactivate company (logical deletion)
         cur.execute("UPDATE companies SET status='Deleted' WHERE company_id=%s", (company_id,))
-        cur.execute("UPDATE users SET status='Inactive' WHERE company_id=%s", (company_id,))
+        cur.execute("UPDATE users SET status='Offline' WHERE company_id=%s", (company_id,))
         conn.commit()
 
         return jsonify({"message": "Company deactivated successfully"}), 200
@@ -464,7 +466,7 @@ def get_companies():
     cur = conn.cursor(dictionary=True)
     
     try:
-        cur.execute("SELECT * FROM companies WHERE status='Active'")
+        cur.execute("SELECT * FROM companies WHERE company_status='Active'")
         companies = cur.fetchall()
         return jsonify(companies), 200
     except Exception as e:
@@ -527,33 +529,85 @@ def handle_users():
 @app.route('/api/devices', methods=['GET'])
 @session_required
 def get_devices():
-    company_id = request.args.get('company_id')
     user = session['user']
-    
-    # If not global admin, restrict to user's company
-    if user['role'] != 'global_admin':
-        company_id = user['company_id']
-    
-    if not company_id:
-        return jsonify({"error": "Company ID is required"}), 400
-    
+    devices = []
+
     try:
-        conn = get_company_db(company_id)
-        cur = conn.cursor(dictionary=True)
-        
-        cur.execute("""
-            SELECT d.*, e.entity_name 
-            FROM devices d 
-            LEFT JOIN entities e ON d.entity_id = e.id
-        """)
-        devices = cur.fetchall()
-        
-        return jsonify(devices), 200
+        if user['role'] == 'global_admin':
+            # Get list of companies from master DB
+            master_conn = get_master_db()
+            master_cur = master_conn.cursor(dictionary=True)
+            master_cur.execute("SELECT company_id FROM companies WHERE company_status='Active'")
+            companies = master_cur.fetchall()
+            master_conn.close()
+
+            if not companies:
+                return jsonify([]), 200  # No companies found → return empty list
+
+            for company in companies:
+                try:
+                    conn = get_company_db(company['company_id'])
+                    cur = conn.cursor(dictionary=True)
+
+                    # Skip if 'devices' table doesn't exist
+                    cur.execute("""
+                        SELECT COUNT(*) AS table_exists 
+                        FROM information_schema.tables 
+                        WHERE table_schema = DATABASE() AND table_name = 'devices'
+                    """)
+                    if cur.fetchone()['table_exists'] == 0:
+                        continue
+
+                    cur.execute("""
+                        SELECT * FROM devices 
+                    """)
+                    company_devices = cur.fetchall()
+
+                    for dev in company_devices:
+                        dev['company_id'] = company['company_id']
+                    devices.extend(company_devices)
+
+                except Exception as e:
+                    # Log and skip broken or misconfigured DBs
+                    logging.exception(f"Error accessing company {company['company_id']}")
+                finally:
+                    if 'conn' in locals():
+                        conn.close()
+
+        else:
+            company_id = user['company_id']
+            try:
+                conn = get_company_db(company_id)
+                cur = conn.cursor(dictionary=True)
+
+                # Skip if 'devices' table doesn't exist
+                cur.execute("""
+                    SELECT COUNT(*) AS table_exists 
+                    FROM information_schema.tables 
+                    WHERE table_schema = DATABASE() AND table_name = 'devices'
+                """)
+                if cur.fetchone()['table_exists'] == 0:
+                    return jsonify([]), 200
+
+                cur.execute("""
+                    SELECT * FROM devices
+                """)
+                devices = cur.fetchall()
+                for dev in devices:
+                    dev['company_id'] = company_id
+
+            except Exception as e:
+                logging.exception(f"Error accessing devices for company {company_id}")
+                return jsonify([]), 200  # Don't raise an error — just return empty
+            finally:
+                if 'conn' in locals():
+                    conn.close()
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if 'conn' in locals():
-            conn.close()
+        logging.exception("Unexpected error in /api/devices")
+        return jsonify([]), 200  # Again, return empty list, not error
+
+    return jsonify(devices), 200
 
 @app.route('/api/entities', methods=['GET', 'POST'])
 @session_required

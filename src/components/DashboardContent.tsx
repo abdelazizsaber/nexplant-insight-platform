@@ -82,7 +82,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           setDevices(devicesData);
           break;
         case "dashboard":
-          // Fetch all data for dashboard
+          // Fetch summary data for dashboard
           if (user.role === "global_admin") {
             const [companiesData, usersData, devicesData] = await Promise.all([
               apiClient.getCompanies() as Promise<Company[]>,
@@ -178,7 +178,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{users.length}</div>
+              <div className="text-2xl font-bold">{activeUsers}</div>
               <p className="text-xs text-muted-foreground">Active users</p>
             </CardContent>
           </Card>
@@ -252,7 +252,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                       </span>
                     </CardTitle>
                     <CardDescription>
-                      ID: {company.id} • {company.device_count || 0} devices • {company.user_count || 0} users
+                      Name: {company.company_name} • ID: {company.company_id} • {company.device_count || 0} devices • {company.user_count || 0} users
                     </CardDescription>
                   </CardHeader>
                 </Card>
