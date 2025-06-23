@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Building2, Users, Monitor, Wifi, WifiOff } from "lucide-react";
@@ -57,14 +56,50 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
     fetchData();
   }, [currentView, user]);
 
+  const fetchCompaniesWithCounts = async () => {
+    try {
+      // First get all companies
+      const companiesData = await apiClient.getCompanies() as Company[];
+      
+      // Then fetch user and device counts for each company
+      const companiesWithCounts = await Promise.all(
+        companiesData.map(async (company) => {
+          try {
+            const [usersData, devicesData] = await Promise.all([
+              apiClient.getUsers(company.id) as Promise<UserData[]>,
+              apiClient.getDevices(company.id) as Promise<Device[]>
+            ]);
+            
+            return {
+              ...company,
+              user_count: usersData.length,
+              device_count: devicesData.length
+            };
+          } catch (error) {
+            console.error(`Error fetching counts for company ${company.id}:`, error);
+            return {
+              ...company,
+              user_count: 0,
+              device_count: 0
+            };
+          }
+        })
+      );
+      
+      setCompanies(companiesWithCounts);
+    } catch (error) {
+      console.error("Error fetching companies:", error);
+      throw error;
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
       switch (currentView) {
         case "companies":
           if (user.role === "global_admin") {
-            const companiesData = await apiClient.getCompanies() as Company[];
-            setCompanies(companiesData);
+            await fetchCompaniesWithCounts();
           }
           break;
         case "users":
@@ -84,12 +119,11 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
         case "dashboard":
           // Fetch summary data for dashboard
           if (user.role === "global_admin") {
-            const [companiesData, usersData, devicesData] = await Promise.all([
-              apiClient.getCompanies() as Promise<Company[]>,
+            const [usersData, devicesData] = await Promise.all([
               apiClient.getUsers() as Promise<UserData[]>,
               apiClient.getDevices() as Promise<Device[]>
             ]);
-            setCompanies(companiesData);
+            await fetchCompaniesWithCounts();
             setUsers(usersData);
             setDevices(devicesData);
           } else {
@@ -252,7 +286,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                       </span>
                     </CardTitle>
                     <CardDescription>
-                      Name: {company.company_name} • ID: {company.company_id} • {company.device_count || 0} devices • {company.user_count || 0} users
+                      ID: {company.id} • {company.device_count || 0} devices • {company.user_count || 0} users
                     </CardDescription>
                   </CardHeader>
                 </Card>
