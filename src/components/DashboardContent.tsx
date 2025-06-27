@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Building2, Users, Monitor, Wifi, WifiOff } from "lucide-react";
@@ -7,6 +6,7 @@ import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { CreateCompanyForm } from "./CreateCompanyForm";
 import { RegisterDeviceForm } from "./RegisterDeviceForm";
+import { AddUserForm } from "./AddUserForm";
 
 interface User {
   username: string;
@@ -149,7 +149,6 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
     }
   };
 
-  // ... keep existing code (renderDashboard function)
   const renderDashboard = () => {
     if (user.role === "global_admin") {
       return (
@@ -297,7 +296,6 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
           </div>
         );
 
-      // ... keep existing code (other cases in renderContent function)
       case "users":
       case "all-users":
         return (
@@ -305,10 +303,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold">Users</h2>
               {user.role !== "user" && (
-                <Button className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add User
-                </Button>
+                <AddUserForm user={user} onUserAdded={fetchData} />
               )}
             </div>
             <div className="grid gap-4">
