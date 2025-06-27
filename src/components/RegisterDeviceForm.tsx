@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface Company {
   company_id: string;
-  name: string;
+  company_name: string;
 }
 
 interface RegisterDeviceFormProps {
