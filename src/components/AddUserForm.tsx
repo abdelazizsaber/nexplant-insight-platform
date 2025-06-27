@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface Company {
   company_id: string;
-  name: string;
+  company_name: string;
 }
 
 interface AddUserFormProps {
@@ -29,6 +29,7 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [formData, setFormData] = useState({
     email: "",
+    username: "",
     firstName: "",
     lastName: "",
     company_id: "",
@@ -73,11 +74,8 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
       // Generate a temporary password
       const tempPassword = generatePassword();
       
-      // Create username from email
-      const username = formData.email.split('@')[0];
-      
       await apiClient.createUser({
-        username: username,
+        username: formData.username,
         password: tempPassword,
         company_id: formData.company_id,
         role: formData.role
@@ -91,6 +89,7 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
       setOpen(false);
       setFormData({
         email: "",
+        username: "",
         firstName: "",
         lastName: "",
         company_id: user.company_id?.toString() || "",
@@ -130,6 +129,15 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              value={formData.username}
+              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               required
             />
           </div>

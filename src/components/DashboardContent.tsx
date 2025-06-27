@@ -67,8 +67,8 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
         companiesData.map(async (company) => {
           try {
             const [usersData, devicesData] = await Promise.all([
-              apiClient.getUsers(company.company_id) as Promise<UserData[]>,
-              apiClient.getDevices(company.company_id) as Promise<Device[]>
+              apiClient.getUsers(company.id) as Promise<UserData[]>,
+              apiClient.getDevices(company.id) as Promise<Device[]>
             ]);
             
             return {
@@ -77,7 +77,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
               device_count: devicesData.length
             };
           } catch (error) {
-            console.error(`Error fetching counts for company ${company.company_id}:`, error);
+            console.error(`Error fetching counts for company ${company.id}:`, error);
             return {
               ...company,
               user_count: 0,
@@ -277,17 +277,17 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Card key={company.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      {company.company_name}
+                      {company.name}
                       <span className={`text-sm font-normal px-2 py-1 rounded ${
-                        company.company_status === "Active" 
+                        company.status === "Active" 
                           ? "text-green-600 bg-green-100" 
                           : "text-red-600 bg-red-100"
                       }`}>
-                        {company.company_status}
+                        {company.status}
                       </span>
                     </CardTitle>
                     <CardDescription>
-                      ID: {company.company_id} • {company.device_count || 0} devices • {company.user_count || 0} users
+                      ID: {company.id} • {company.device_count || 0} devices • {company.user_count || 0} users
                     </CardDescription>
                   </CardHeader>
                 </Card>
@@ -314,7 +314,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                       {userData.username}
                       <div className="flex items-center gap-2">
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          userData.user_status === "Online" 
+                          userData.status === "Online" 
                             ? "text-green-600 bg-green-100" 
                             : "text-gray-600 bg-gray-100"
                         }`}>
@@ -345,19 +345,19 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Card key={device.id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      {device.device_name}
+                      {device.name}
                       <div className="flex items-center gap-2">
-                        {device.device_status === "Online" ? (
+                        {device.status === "Online" ? (
                           <Wifi className="h-4 w-4 text-green-600" />
                         ) : (
                           <WifiOff className="h-4 w-4 text-red-600" />
                         )}
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          device.device_status === "Online" 
+                          device.status === "Online" 
                             ? "text-green-600 bg-green-100" 
                             : "text-red-600 bg-red-100"
                         }`}>
-                          {device.device_status}
+                          {device.status}
                         </span>
                       </div>
                     </CardTitle>
@@ -385,14 +385,14 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                 <Card key={device.device_id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      {device.device_name}
+                      {device.name}
                       <div className="flex items-center gap-2">
                         <span className={`text-sm font-normal px-2 py-1 rounded ${
-                          device.device_status === "Online" 
+                          device.status === "Online" 
                             ? "text-green-600 bg-green-100" 
                             : "text-orange-600 bg-orange-100"
                         }`}>
-                          {device.device_status}
+                          {device.status}
                         </span>
                       </div>
                     </CardTitle>
