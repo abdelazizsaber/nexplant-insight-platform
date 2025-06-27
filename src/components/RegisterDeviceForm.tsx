@@ -15,11 +15,6 @@ interface Company {
   name: string;
 }
 
-interface Entity {
-  id: string;
-  entity_name: string;
-}
-
 interface RegisterDeviceFormProps {
   user: {
     username: string;
@@ -33,10 +28,8 @@ export function RegisterDeviceForm({ user, onDeviceRegistered }: RegisterDeviceF
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [entities, setEntities] = useState<Entity[]>([]);
   const [formData, setFormData] = useState({
     company_id: "",
-    entity_name: "",
     device_name: "",
     device_id: "",
     device_type: "",
@@ -50,7 +43,6 @@ export function RegisterDeviceForm({ user, onDeviceRegistered }: RegisterDeviceF
     }
     if (open && user.company_id) {
       setFormData(prev => ({ ...prev, company_id: user.company_id.toString() }));
-      fetchEntities(user.company_id.toString());
     }
   }, [open, user]);
 
@@ -63,18 +55,8 @@ export function RegisterDeviceForm({ user, onDeviceRegistered }: RegisterDeviceF
     }
   };
 
-  const fetchEntities = async (companyId: string) => {
-    try {
-      const entitiesData = await apiClient.getEntities(companyId) as Entity[];
-      setEntities(entitiesData);
-    } catch (error) {
-      console.error("Error fetching entities:", error);
-    }
-  };
-
   const handleCompanyChange = (companyId: string) => {
     setFormData({ ...formData, company_id: companyId });
-    fetchEntities(companyId);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,7 +72,6 @@ export function RegisterDeviceForm({ user, onDeviceRegistered }: RegisterDeviceF
       setOpen(false);
       setFormData({
         company_id: user.company_id?.toString() || "",
-        entity_name: "",
         device_name: "",
         device_id: "",
         device_type: "",
@@ -132,28 +113,13 @@ export function RegisterDeviceForm({ user, onDeviceRegistered }: RegisterDeviceF
                 <SelectContent>
                   {companies.map((company) => (
                     <SelectItem key={company.company_id} value={company.company_id}>
-                      {company.name}
+                      {company.company_name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="entity_name">Entity</Label>
-            <Select value={formData.entity_name} onValueChange={(value) => setFormData({ ...formData, entity_name: value })} required>
-              <SelectTrigger>
-                <SelectValue placeholder="Select an entity" />
-              </SelectTrigger>
-              <SelectContent>
-                {entities.map((entity) => (
-                  <SelectItem key={entity.id} value={entity.entity_name}>
-                    {entity.entity_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
           <div className="space-y-2">
             <Label htmlFor="device_name">Device Name</Label>
             <Input

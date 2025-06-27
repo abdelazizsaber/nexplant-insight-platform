@@ -31,7 +31,7 @@ MASTER_DB_CONFIG = {
 # === HELPERS ===
 def generate_company_id(country_code):
     rand_id = ''.join(random.choices(string.digits, k=5))
-    return f"{country_code.upper()}_Id{rand_id}"
+    return f"{country_code.upper()}_{rand_id}"
 
 def generate_password(length=10):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
@@ -116,7 +116,7 @@ def create_company_database_schema(company_id):
                 device_id VARCHAR(255) UNIQUE NOT NULL,
                 device_type VARCHAR(100) NOT NULL,
                 device_description TEXT,
-                device_status ENUM('online', 'offline') DEFAULT 'offline',
+                device_status ENUM('Online', 'Offline') DEFAULT 'Offline',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
             )
@@ -146,13 +146,27 @@ def create_company_database_schema(company_id):
 
 def generate_mqtt_listener_script(company_id):
     """Generate MQTT listener script for the company"""
+    current_user = getpass.getuser()
+
+    venv_python = "/var/www/nexplant/Backend/venv/python3"
+    scripts_dir = Path('/opt/mqtt_scripts')
+    script_path = scripts_dir / f"mqtt_listener_{company_id}.py"
+    service_path = Path(f"/etc/systemd/system/mqtt_{company_id}.service")
+
+    # Script content
     script_content = f"""
 import paho.mqtt.client as mqtt
 import mysql.connector
 import json
+import logging
 from datetime import datetime
 
-# Database configuration
+logging.basicConfig(
+    filename='/var/log/mqtt_listener_{company_id}.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+
 DB_CONFIG = {{
     'host': 'localhost',
     'user': 'zizo',
@@ -160,59 +174,95 @@ DB_CONFIG = {{
     'database': '{company_id}'
 }}
 
-# MQTT configuration
 MQTT_BROKER = 'localhost'
 MQTT_PORT = 1883
 MQTT_TOPIC = '{company_id}/+'
 
 def on_connect(client, userdata, flags, rc):
-    print(f"Connected to MQTT broker with result code {{rc}}")
+    logging.info(f"Connected to MQTT broker with result code {{rc}}")
     client.subscribe(MQTT_TOPIC)
 
 def on_message(client, userdata, msg):
     try:
-        topic_parts = msg.topic.split('/')
-        device_type = topic_parts[1] if len(topic_parts) > 1 else 'unknown'
-        
-        # Parse message
-        data = json.loads(msg.payload.decode())
-        device_id = data.get('device_id', 'unknown')
-        
-        # Insert into database
-        conn = mysql.connector.connect(**DB_CONFIG)
-        cur = conn.cursor()
-        
-        cur.execute('''
-            INSERT INTO data (device_id, device_type, device_data)
-            VALUES (%s, %s, %s)
-        ''', (device_id, device_type, json.dumps(data)))
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"Data inserted for device {{device_id}}: {{data}}")
-        
-    except Exception as e:
-        print(f"Error processing message: {{e}}")
+        payload = msg.payload
+        if len(payload) < 16:
+            logging.warning("Received payload too short")
+            return
 
-# Create MQTT client
+        # Parse binary payload
+        data_index = payload[0]
+        data_value = int.from_bytes(payload[1:5], byteorder='big', signed=False)  # or signed=True if needed
+        device_sn = payload[5:16].decode('utf-8', errors='ignore').strip()
+
+        with mysql.connector.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                # Validate device_id
+                cur.execute("SELECT device_type FROM devices WHERE device_id = %s", (device_sn,))
+                row = cur.fetchone()
+                if not row:
+                    logging.warning(f"Ignored data for unknown device_id '{device_sn}'")
+                    return
+
+                device_type = row[0]
+
+                # Timestamp logic
+                if data_index == 0:
+                    timestamp_expr = "NOW()"
+                else:
+                    timestamp_expr = f"NOW() - INTERVAL {data_index} SECOND"
+
+                # Insert into data table
+                query = f"INSERT INTO data (device_id, device_type, data_value, timestamp) VALUES (%s, %s, %s, {timestamp_expr})"
+                cur.execute(query, (
+                    device_sn,
+                    device_type,
+                    data_value
+                ))
+
+                conn.commit()
+                logging.info(f"Inserted data for {device_sn} (age={data_index}s, value={data_value})")
+
+    except Exception as e:
+        logging.error(f"Error processing message: {e}", exc_info=True)
+
 client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
 
-# Connect and start loop
 client.connect(MQTT_BROKER, MQTT_PORT, 60)
 client.loop_forever()
 """
-    
-    # Create scripts directory if it doesn't exist
-    scripts_dir = 'mqtt_scripts'
-    os.makedirs(scripts_dir, exist_ok=True)
-    
-    script_path = os.path.join(scripts_dir, f'mqtt_listener_{company_id}.py')
-    
+
+    # Create script directory and write the Python file
+    scripts_dir.mkdir(parents=True, exist_ok=True)
     with open(script_path, 'w') as f:
         f.write(script_content)
+    os.chmod(script_path, 0o755)
+
+    # Create systemd service file (no env reference)
+    service_content = f"""[Unit]
+Description=MQTT Listener for {company_id}
+After=network.target
+
+[Service]
+Type=simple
+User={current_user}
+WorkingDirectory={scripts_dir}
+ExecStart={venv_python} {script_path}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    with open(service_path, 'w') as f:
+        f.write(service_content)
+
+    # Register the service
+    subprocess.run(["systemctl", "daemon-reexec"])
+    subprocess.run(["systemctl", "daemon-reload"])
+    subprocess.run(["systemctl", "enable", f"mqtt_{company_id}.service"])
+    subprocess.run(["systemctl", "start", f"mqtt_{company_id}.service"])
     
     print(f"MQTT listener script created: {script_path}")
     return script_path
@@ -369,7 +419,7 @@ def create_company():
         #script_path = generate_mqtt_listener_script(company_id)
         
         # Send welcome email
-        #send_welcome_email(email, company_id, password)
+        send_welcome_email(email, company_id, password)
 
         return jsonify({
             "message": "Company created successfully",
@@ -389,41 +439,30 @@ def create_company():
 def register_device():
     data = request.json
     company_id = data.get('company_id')
-    entity_name = data.get('entity_name')
     device_name = data.get('device_name')
     device_id = data.get('device_id')
     device_type = data.get('device_type')
     description = data.get('description', '')
 
-    if not all([company_id, entity_name, device_name, device_id, device_type]):
+    if not all([company_id, device_name, device_id, device_type]):
         return jsonify({"error": "Missing required fields"}), 400
 
     try:
         # Get entity ID or create entity
         conn = get_company_db(company_id)
         cur = conn.cursor(dictionary=True)
-        
-        # Check if entity exists
-        cur.execute("SELECT id FROM entities WHERE entity_name=%s", (entity_name,))
-        entity = cur.fetchone()
-        
-        if not entity:
-            return jsonify({"error": f"Entity '{entity_name}' not found. Please create entity first."}), 404
-        
-        entity_id = entity['id']
-        
+       
         # Register device
         cur.execute("""
-            INSERT INTO devices (entity_id, device_name, device_id, device_type, device_description, device_status)
-            VALUES (%s, %s, %s, %s, %s, 'not_connected')
-        """, (entity_id, device_name, device_id, device_type, description))
+            INSERT INTO devices (device_name, device_id, device_type, device_description, device_status)
+            VALUES (%s, %s, %s, %s, 'Offline')
+        """, (device_name, device_id, device_type, description))
         
         conn.commit()
         
         return jsonify({
             "message": "Device registered successfully",
             "device_id": device_id,
-            "entity_name": entity_name
         }), 201
 
     except Exception as e:
@@ -446,7 +485,7 @@ def deactivate_company():
 
     try:
         # Deactivate company (logical deletion)
-        cur.execute("UPDATE companies SET status='Deleted' WHERE company_id=%s", (company_id,))
+        cur.execute("UPDATE companies SET status='Disabled' WHERE company_id=%s", (company_id,))
         cur.execute("UPDATE users SET status='Offline' WHERE company_id=%s", (company_id,))
         conn.commit()
 

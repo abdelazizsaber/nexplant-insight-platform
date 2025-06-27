@@ -1,5 +1,5 @@
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Type definitions for API responses
 interface LoginResponse {
@@ -86,7 +86,6 @@ class ApiClient {
 
   async registerDevice(deviceData: {
     company_id: string;
-    entity_name: string;
     device_name: string;
     device_id: string;
     device_type: string;
