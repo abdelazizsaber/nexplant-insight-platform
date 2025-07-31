@@ -83,6 +83,11 @@ export function AppSidebar({ user, currentView, setCurrentView }: AppSidebarProp
       return [
         ...baseItems,
         {
+          title: "Production",
+          icon: Settings,
+          id: "production"
+        },
+        {
           title: "Machines",
           icon: Settings,
           id: "machines"
@@ -100,9 +105,14 @@ export function AppSidebar({ user, currentView, setCurrentView }: AppSidebarProp
       ];
     }
 
-    // Regular user
+    // Regular user (view_only_user)
     return [
       ...baseItems,
+      {
+        title: "Production",
+        icon: Settings,
+        id: "production"
+      },
       {
         title: "Machines",
         icon: Settings,

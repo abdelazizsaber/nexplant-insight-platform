@@ -158,6 +158,58 @@ class ApiClient {
       body: JSON.stringify(entityData),
     });
   }
+
+  // Production scheduling endpoints
+  async getShifts() {
+    return this.request('/api/shifts');
+  }
+
+  async createShift(shiftData: {
+    shift_name: string;
+    start_time: string;
+    end_time: string;
+  }) {
+    return this.request('/api/shifts', {
+      method: 'POST',
+      body: JSON.stringify(shiftData),
+    });
+  }
+
+  async getProducts() {
+    return this.request('/api/products');
+  }
+
+  async createProduct(productData: {
+    product_name: string;
+    product_description?: string;
+    rated_speed: number;
+  }) {
+    return this.request('/api/products', {
+      method: 'POST',
+      body: JSON.stringify(productData),
+    });
+  }
+
+  async getProductionSchedule() {
+    return this.request('/api/production-schedule');
+  }
+
+  async createProductionSchedule(scheduleData: {
+    device_id: string;
+    product_id: number;
+    shift_id: number;
+    scheduled_date: string;
+    start_time: string;
+    end_time: string;
+    is_recurring?: boolean;
+    start_date?: string;
+    end_date?: string;
+  }) {
+    return this.request('/api/production-schedule', {
+      method: 'POST',
+      body: JSON.stringify(scheduleData),
+    });
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

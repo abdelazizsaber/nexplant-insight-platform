@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CreateCompanyForm } from "./CreateCompanyForm";
 import { RegisterDeviceForm } from "./RegisterDeviceForm";
 import { AddUserForm } from "./AddUserForm";
+import { ProductionView } from "./production/ProductionView";
 
 interface User {
   username: string;
@@ -405,6 +406,9 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
             </div>
           </div>
         );
+
+      case "production":
+        return <ProductionView user={user} />;
 
       default:
         return renderDashboard();

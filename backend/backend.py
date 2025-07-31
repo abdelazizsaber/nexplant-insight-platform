@@ -165,14 +165,17 @@ def create_company_database_schema(company_id):
         # Create data table for production schedule
         cur.execute("""
             CREATE TABLE production_schedule (
-                schedule_id INT PRIMARY KEY,
-                device_id INT REFERENCES devices(device_id),
-                product_id INT REFERENCES products(id),
+                schedule_id INT AUTO_INCREMENT PRIMARY KEY,
+                device_id VARCHAR(255),
+                product_id INT,
                 rated_speed DECIMAL(10,2),
-                shift_id INT REFERENCES shifts(id),
+                shift_id INT,
                 scheduled_date DATE,
                 start_time TIME,
-                end_time TIME
+                end_time TIME,
+                FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE
             )
         """)
         
@@ -693,6 +696,262 @@ def get_device_data(device_id):
     finally:
         if 'conn' in locals():
             conn.close()
+
+# === PRODUCTION SCHEDULING ROUTES ===
+@app.route('/api/shifts', methods=['GET', 'POST'])
+@session_required
+def handle_shifts():
+    user = session['user']
+    company_id = user['company_id']
+    
+    if user['role'] == 'global_admin':
+        return jsonify({"error": "Global admin cannot access company data"}), 403
+    
+    if not company_id:
+        return jsonify({"error": "Company ID is required"}), 400
+    
+    if request.method == 'GET':
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            cur.execute("SELECT * FROM shifts ORDER BY start_time")
+            shifts = cur.fetchall()
+            
+            return jsonify(shifts), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
+    
+    elif request.method == 'POST':
+        if user['role'] != 'company_admin':
+            return jsonify({"error": "Only company admin can create shifts"}), 403
+        
+        data = request.json
+        shift_name = data.get('shift_name')
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        
+        if not all([shift_name, start_time, end_time]):
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            # Check if shift name is unique
+            cur.execute("SELECT id FROM shifts WHERE shift_name=%s", (shift_name,))
+            if cur.fetchone():
+                return jsonify({"error": "Shift name already exists"}), 409
+            
+            # Check for time overlaps
+            cur.execute("""
+                SELECT id FROM shifts 
+                WHERE (%s BETWEEN start_time AND end_time) 
+                   OR (%s BETWEEN start_time AND end_time)
+                   OR (start_time BETWEEN %s AND %s)
+            """, (start_time, end_time, start_time, end_time))
+            
+            if cur.fetchone():
+                return jsonify({"error": "Shift times overlap with existing shift"}), 409
+            
+            # Insert new shift
+            cur.execute("""
+                INSERT INTO shifts (shift_name, start_time, end_time)
+                VALUES (%s, %s, %s)
+            """, (shift_name, start_time, end_time))
+            conn.commit()
+            
+            return jsonify({"message": "Shift created successfully"}), 201
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+@app.route('/api/products', methods=['GET', 'POST'])
+@session_required
+def handle_products():
+    user = session['user']
+    company_id = user['company_id']
+    
+    if user['role'] == 'global_admin':
+        return jsonify({"error": "Global admin cannot access company data"}), 403
+    
+    if not company_id:
+        return jsonify({"error": "Company ID is required"}), 400
+    
+    if request.method == 'GET':
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            cur.execute("SELECT * FROM products ORDER BY product_name")
+            products = cur.fetchall()
+            
+            return jsonify(products), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
+    
+    elif request.method == 'POST':
+        if user['role'] != 'company_admin':
+            return jsonify({"error": "Only company admin can create products"}), 403
+        
+        data = request.json
+        product_name = data.get('product_name')
+        product_description = data.get('product_description', '')
+        rated_speed = data.get('rated_speed')
+        
+        if not all([product_name, rated_speed]):
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        if float(rated_speed) <= 0:
+            return jsonify({"error": "Rated speed must be greater than 0"}), 400
+        
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            # Check if product name is unique
+            cur.execute("SELECT id FROM products WHERE product_name=%s", (product_name,))
+            if cur.fetchone():
+                return jsonify({"error": "Product name already exists"}), 409
+            
+            # Insert new product
+            cur.execute("""
+                INSERT INTO products (product_name, product_description, rated_speed)
+                VALUES (%s, %s, %s)
+            """, (product_name, product_description, rated_speed))
+            conn.commit()
+            
+            return jsonify({"message": "Product created successfully"}), 201
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+@app.route('/api/production-schedule', methods=['GET', 'POST'])
+@session_required
+def handle_production_schedule():
+    user = session['user']
+    company_id = user['company_id']
+    
+    if user['role'] == 'global_admin':
+        return jsonify({"error": "Global admin cannot access company data"}), 403
+    
+    if not company_id:
+        return jsonify({"error": "Company ID is required"}), 400
+    
+    if request.method == 'GET':
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            cur.execute("""
+                SELECT ps.*, d.device_name, p.product_name, s.shift_name,
+                       p.rated_speed as product_rated_speed
+                FROM production_schedule ps
+                LEFT JOIN devices d ON ps.device_id = d.device_id
+                LEFT JOIN products p ON ps.product_id = p.id
+                LEFT JOIN shifts s ON ps.shift_id = s.id
+                ORDER BY ps.scheduled_date, ps.start_time
+            """)
+            schedules = cur.fetchall()
+            
+            return jsonify(schedules), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
+    
+    elif request.method == 'POST':
+        if user['role'] != 'company_admin':
+            return jsonify({"error": "Only company admin can create production schedules"}), 403
+        
+        data = request.json
+        device_id = data.get('device_id')
+        product_id = data.get('product_id')
+        shift_id = data.get('shift_id')
+        scheduled_date = data.get('scheduled_date')
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        is_recurring = data.get('is_recurring', False)
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not all([device_id, product_id, shift_id, scheduled_date, start_time, end_time]):
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        try:
+            conn = get_company_db(company_id)
+            cur = conn.cursor(dictionary=True)
+            
+            # Validate shift times
+            cur.execute("SELECT start_time, end_time FROM shifts WHERE id=%s", (shift_id,))
+            shift = cur.fetchone()
+            if not shift:
+                return jsonify({"error": "Invalid shift"}), 400
+            
+            # Check if production times are within shift times
+            if start_time < shift['start_time'] or end_time > shift['end_time']:
+                return jsonify({"error": "Production times must be within shift times"}), 400
+            
+            # Get product rated speed
+            cur.execute("SELECT rated_speed FROM products WHERE id=%s", (product_id,))
+            product = cur.fetchone()
+            if not product:
+                return jsonify({"error": "Invalid product"}), 400
+            
+            if is_recurring and start_date and end_date:
+                # Create recurring schedules
+                from datetime import datetime, timedelta
+                current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+                
+                schedule_id = 1
+                cur.execute("SELECT COALESCE(MAX(schedule_id), 0) + 1 as next_id FROM production_schedule")
+                next_id = cur.fetchone()['next_id']
+                
+                while current_date <= end_date_obj:
+                    cur.execute("""
+                        INSERT INTO production_schedule 
+                        (schedule_id, device_id, product_id, rated_speed, shift_id, 
+                         scheduled_date, start_time, end_time)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (next_id, device_id, product_id, product['rated_speed'], 
+                          shift_id, current_date, start_time, end_time))
+                    current_date += timedelta(days=1)
+                    next_id += 1
+            else:
+                # Create single schedule
+                cur.execute("SELECT COALESCE(MAX(schedule_id), 0) + 1 as next_id FROM production_schedule")
+                next_id = cur.fetchone()['next_id']
+                
+                cur.execute("""
+                    INSERT INTO production_schedule 
+                    (schedule_id, device_id, product_id, rated_speed, shift_id, 
+                     scheduled_date, start_time, end_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (next_id, device_id, product_id, product['rated_speed'], 
+                      shift_id, scheduled_date, start_time, end_time))
+            
+            conn.commit()
+            return jsonify({"message": "Production schedule created successfully"}), 201
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"error": str(e)}), 500
+        finally:
+            if 'conn' in locals():
+                conn.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
