@@ -11,6 +11,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from pathlib import Path
+import logging
+
 
 app = Flask(__name__)
 
@@ -19,7 +22,7 @@ app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'  # Change
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Session expires in 8 hours
 
 # Enable CORS with credentials
-CORS(app, supports_credentials=True, origins=['http://192.168.0.87'])  # Adjust origin as needed
+CORS(app, supports_credentials=True, origins=['http://10.0.1.73'])  # Adjust origin as needed
 
 MASTER_DB_CONFIG = {
     'host': 'localhost',
@@ -27,6 +30,10 @@ MASTER_DB_CONFIG = {
     'password': 'Robocon2009!',
     'database': 'nexplant_master'
 }
+
+logging.basicConfig(filename='/var/www/nexplant/Backend/nexplant.log', level=logging.DEBUG, 
+                    format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger=logging.getLogger(__name__)
 
 # === HELPERS ===
 def generate_company_id(country_code):
@@ -129,8 +136,43 @@ def create_company_database_schema(company_id):
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 device_id VARCHAR(255) NOT NULL,
                 device_type VARCHAR(100) NOT NULL,
-                device_data JSON,
+                device_data DECIMAL(10,2),
+                rated_speed DECIMAL(10,2),
                 FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create data table for shifts
+        cur.execute("""
+            CREATE TABLE shifts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                shift_name VARCHAR(50),
+                start_time TIME,
+                end_time TIME
+            )
+        """)
+        
+        # Create data table for products
+        cur.execute("""
+            CREATE TABLE products (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                product_name VARCHAR(255),
+                product_description TEXT,
+                rated_speed DECIMAL(10,2)
+            )
+        """)
+        
+        # Create data table for production schedule
+        cur.execute("""
+            CREATE TABLE production_schedule (
+                schedule_id INT PRIMARY KEY,
+                device_id INT REFERENCES devices(device_id),
+                product_id INT REFERENCES products(id),
+                rated_speed DECIMAL(10,2),
+                shift_id INT REFERENCES shifts(id),
+                scheduled_date DATE,
+                start_time TIME,
+                end_time TIME
             )
         """)
         
@@ -144,128 +186,7 @@ def create_company_database_schema(company_id):
     finally:
         conn.close()
 
-def generate_mqtt_listener_script(company_id):
-    """Generate MQTT listener script for the company"""
-    current_user = getpass.getuser()
 
-    venv_python = "/var/www/nexplant/Backend/venv/python3"
-    scripts_dir = Path('/opt/mqtt_scripts')
-    script_path = scripts_dir / f"mqtt_listener_{company_id}.py"
-    service_path = Path(f"/etc/systemd/system/mqtt_{company_id}.service")
-
-    # Script content
-    script_content = f"""
-import paho.mqtt.client as mqtt
-import mysql.connector
-import json
-import logging
-from datetime import datetime
-
-logging.basicConfig(
-    filename='/var/log/mqtt_listener_{company_id}.log',
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
-
-DB_CONFIG = {{
-    'host': 'localhost',
-    'user': 'zizo',
-    'password': 'Robocon2009!',
-    'database': '{company_id}'
-}}
-
-MQTT_BROKER = 'localhost'
-MQTT_PORT = 1883
-MQTT_TOPIC = '{company_id}/+'
-
-def on_connect(client, userdata, flags, rc):
-    logging.info(f"Connected to MQTT broker with result code {{rc}}")
-    client.subscribe(MQTT_TOPIC)
-
-def on_message(client, userdata, msg):
-    try:
-        payload = msg.payload
-        if len(payload) < 16:
-            logging.warning("Received payload too short")
-            return
-
-        # Parse binary payload
-        data_index = payload[0]
-        data_value = int.from_bytes(payload[1:5], byteorder='big', signed=False)  # or signed=True if needed
-        device_sn = payload[5:16].decode('utf-8', errors='ignore').strip()
-
-        with mysql.connector.connect(**DB_CONFIG) as conn:
-            with conn.cursor() as cur:
-                # Validate device_id
-                cur.execute("SELECT device_type FROM devices WHERE device_id = %s", (device_sn,))
-                row = cur.fetchone()
-                if not row:
-                    logging.warning(f"Ignored data for unknown device_id '{device_sn}'")
-                    return
-
-                device_type = row[0]
-
-                # Timestamp logic
-                if data_index == 0:
-                    timestamp_expr = "NOW()"
-                else:
-                    timestamp_expr = f"NOW() - INTERVAL {data_index} SECOND"
-
-                # Insert into data table
-                query = f"INSERT INTO data (device_id, device_type, data_value, timestamp) VALUES (%s, %s, %s, {timestamp_expr})"
-                cur.execute(query, (
-                    device_sn,
-                    device_type,
-                    data_value
-                ))
-
-                conn.commit()
-                logging.info(f"Inserted data for {device_sn} (age={data_index}s, value={data_value})")
-
-    except Exception as e:
-        logging.error(f"Error processing message: {e}", exc_info=True)
-
-client = mqtt.Client()
-client.on_connect = on_connect
-client.on_message = on_message
-
-client.connect(MQTT_BROKER, MQTT_PORT, 60)
-client.loop_forever()
-"""
-
-    # Create script directory and write the Python file
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    with open(script_path, 'w') as f:
-        f.write(script_content)
-    os.chmod(script_path, 0o755)
-
-    # Create systemd service file (no env reference)
-    service_content = f"""[Unit]
-Description=MQTT Listener for {company_id}
-After=network.target
-
-[Service]
-Type=simple
-User={current_user}
-WorkingDirectory={scripts_dir}
-ExecStart={venv_python} {script_path}
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-    with open(service_path, 'w') as f:
-        f.write(service_content)
-
-    # Register the service
-    subprocess.run(["systemctl", "daemon-reexec"])
-    subprocess.run(["systemctl", "daemon-reload"])
-    subprocess.run(["systemctl", "enable", f"mqtt_{company_id}.service"])
-    subprocess.run(["systemctl", "start", f"mqtt_{company_id}.service"])
-    
-    print(f"MQTT listener script created: {script_path}")
-    return script_path
 
 def send_welcome_email(email, company_id, password):
     """Send welcome email to new company admin"""
@@ -273,6 +194,24 @@ def send_welcome_email(email, company_id, password):
     print(f"Welcome email would be sent to {email}")
     print(f"Company ID: {company_id}")
     print(f"Password: {password}")
+    
+    # To REMOVE!!!
+    
+    # Define paths
+    env_path = Path("/var/www/nexplant/Backend")
+    env_file_path = env_path / f"{company_id}.env"
+    
+    # Write password to file
+    try:
+        with open(env_file_path, "a") as f:
+            f.write("USERNAME=" + email + "\n")
+            f.write("PASSWORD=" + password)
+        print(f"Env file generated")
+    except Exception as e:
+        print(f"Failed to write to file: {e}")
+    
+    
+    
 
 # === AUTHENTICATION ROUTES ===
 @app.route('/api/auth/login', methods=['POST'])
@@ -323,7 +262,7 @@ def login():
             cur.execute("SELECT company_status FROM companies WHERE company_id=%s", (user['company_id'],))
             company = cur.fetchone()
             
-            if not company or company['status'] != 'Active':
+            if not company or company['company_status'] != 'Active':
                 return jsonify({"error": "This account is inactive"}), 403
             
             # Update last login
@@ -350,8 +289,7 @@ def login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     except Exception as e:
-        import traceback
-        print(traceback.format_exc())
+        logger.error(e)
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -416,7 +354,8 @@ def create_company():
         create_company_database_schema(company_id)
         
         # Generate MQTT script
-        #script_path = generate_mqtt_listener_script(company_id)
+        #ToDo: create an automated way to generate the MQTT listener scripts
+        #issue: http://127.0.0.1:3000/Abdelazizelmounir/NexplantWebsite/issues/2#issue-11
         
         # Send welcome email
         send_welcome_email(email, company_id, password)
@@ -460,6 +399,9 @@ def register_device():
         
         conn.commit()
         
+        #ToDo: create a script that can create the MQTT user and send an email with the password, currently the script needs to run from inside the server itself using sudo command
+        #issue: http://127.0.0.1:3000/Abdelazizelmounir/NexplantWebsite/issues/1#issue-10
+        
         return jsonify({
             "message": "Device registered successfully",
             "device_id": device_id,
@@ -485,7 +427,7 @@ def deactivate_company():
 
     try:
         # Deactivate company (logical deletion)
-        cur.execute("UPDATE companies SET status='Disabled' WHERE company_id=%s", (company_id,))
+        cur.execute("UPDATE companies SET company_status='Disabled' WHERE company_id=%s", (company_id,))
         cur.execute("UPDATE users SET status='Offline' WHERE company_id=%s", (company_id,))
         conn.commit()
 
@@ -554,9 +496,11 @@ def handle_users():
         try:
             cur.execute("""
                 INSERT INTO users (username, password, company_id, role, status)
-                VALUES (%s, %s, %s, %s, 'Active')
-            """, (username, hashed_password, company_id, role))
+                VALUES (%s, %s, %s, %s, %s)
+            """, (username, hashed_password, company_id, role, 'Offline'))
             conn.commit()
+            
+            # ToDo: Send an email with the password to the email
             
             return jsonify({"message": "User created successfully"}), 201
         except Exception as e:

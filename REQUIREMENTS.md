@@ -40,6 +40,9 @@ The platform serves as a centralized hub for managing IoT devices across multipl
   - Entities (locations/facilities)
   - Devices registration
   - IoT data storage
+  - Production shifts
+  - products information
+  - Production schedule
 
 ## 3. User Roles and Permissions
 
@@ -54,13 +57,17 @@ The platform serves as a centralized hub for managing IoT devices across multipl
 ### 3.2 Company Admin
 - **Capabilities:**
   - Manage users within their company
-  - Register devices for their company
+  - modify devices data of their company (device name, device description)
   - View company-specific data and analytics
   - Manage entities/locations
+  - Manage the production details (production shifts, Products information, Production schedule)
+  - Access dashboards that shows the OEE
 
 ### 3.3 View-Only User
 - **Capabilities:**
   - View devices and data within their company
+  - Access dashboards that shows the OEE
+  - Access production details dashboard as read only
   - Access read-only dashboards
   - No administrative functions
 
@@ -101,7 +108,7 @@ The platform serves as a centralized hub for managing IoT devices across multipl
 - **REQ-ENT-004:** Entity listing and management
 
 ### 4.6 Data Management
-- **REQ-DATA-001:** Store IoT data with timestamp, device ID, and JSON payload
+- **REQ-DATA-001:** Store IoT data with timestamp, device ID, and parse payload
 - **REQ-DATA-002:** MQTT integration for real-time data ingestion
 - **REQ-DATA-003:** Data retrieval with date range filtering
 - **REQ-DATA-004:** Data visualization and analytics
