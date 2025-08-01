@@ -718,6 +718,13 @@ def handle_shifts():
             cur.execute("SELECT * FROM shifts ORDER BY start_time")
             shifts = cur.fetchall()
             
+            # Convert timedelta objects to strings for JSON serialization
+            for shift in shifts:
+                if 'start_time' in shift and shift['start_time']:
+                    shift['start_time'] = str(shift['start_time'])
+                if 'end_time' in shift and shift['end_time']:
+                    shift['end_time'] = str(shift['end_time'])
+            
             return jsonify(shifts), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -865,6 +872,15 @@ def handle_production_schedule():
                 ORDER BY ps.scheduled_date, ps.start_time
             """)
             schedules = cur.fetchall()
+            
+            # Convert timedelta objects to strings for JSON serialization
+            for schedule in schedules:
+                if 'start_time' in schedule and schedule['start_time']:
+                    schedule['start_time'] = str(schedule['start_time'])
+                if 'end_time' in schedule and schedule['end_time']:
+                    schedule['end_time'] = str(schedule['end_time'])
+                if 'scheduled_date' in schedule and schedule['scheduled_date']:
+                    schedule['scheduled_date'] = str(schedule['scheduled_date'])
             
             return jsonify(schedules), 200
         except Exception as e:
