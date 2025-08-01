@@ -13,11 +13,18 @@ const shiftSchema = z.object({
   start_time: z.string().min(1, "Start time is required"),
   end_time: z.string().min(1, "End time is required"),
 }).refine((data) => {
-  const start = new Date(`1970-01-01T${data.start_time}`);
-  const end = new Date(`1970-01-01T${data.end_time}`);
-  return end > start;
+  const [sh, sm] = data.start_time.split(":").map(Number);
+  const [eh, em] = data.end_time.split(":").map(Number);
+
+  const startMinutes = sh * 60 + sm;
+  const endMinutes = eh * 60 + em;
+
+  const duration = (endMinutes - startMinutes + 1440) % 1440;
+
+  // must be > 0 (non-zero duration)
+  return duration > 0;
 }, {
-  message: "End time must be after start time",
+  message: "End time must be after start time or span overnight",
   path: ["end_time"],
 });
 

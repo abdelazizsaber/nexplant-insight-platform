@@ -21,9 +21,16 @@ const scheduleSchema = z.object({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
 }).refine((data) => {
-  const start = new Date(`1970-01-01T${data.start_time}`);
-  const end = new Date(`1970-01-01T${data.end_time}`);
-  return end > start;
+  const [sh, sm] = data.start_time.split(":").map(Number);
+  const [eh, em] = data.end_time.split(":").map(Number);
+
+  const startMinutes = sh * 60 + sm;
+  const endMinutes = eh * 60 + em;
+
+  const duration = (endMinutes - startMinutes + 1440) % 1440;
+
+  // must be > 0 (non-zero duration)
+  return duration > 0;
 }, {
   message: "End time must be after start time",
   path: ["end_time"],
@@ -63,6 +70,11 @@ interface CreateScheduleFormProps {
   shifts: Shift[];
 }
 
+function timeStringToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
 export function CreateScheduleForm({ onSuccess, devices, products, shifts }: CreateScheduleFormProps) {
   const [loading, setLoading] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
@@ -83,24 +95,38 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
   const startTime = watch("start_time");
   const endTime = watch("end_time");
 
-  const validateTimesWithinShift = () => {
-    if (selectedShift && startTime && endTime) {
-      const shiftStart = new Date(`1970-01-01T${selectedShift.start_time}`);
-      const shiftEnd = new Date(`1970-01-01T${selectedShift.end_time}`);
-      const prodStart = new Date(`1970-01-01T${startTime}`);
-      const prodEnd = new Date(`1970-01-01T${endTime}`);
-      
-      if (prodStart < shiftStart || prodEnd > shiftEnd) {
-        toast({
-          title: "Invalid Time",
-          description: `Production times must be within shift hours (${selectedShift.start_time} - ${selectedShift.end_time})`,
-          variant: "destructive",
-        });
-        return false;
-      }
-    }
-    return true;
-  };
+	const validateTimesWithinShift = () => {
+	  if (selectedShift && startTime && endTime) {
+		const shiftStartMin = timeStringToMinutes(selectedShift.start_time);
+		let shiftEndMin = timeStringToMinutes(selectedShift.end_time);
+		let prodStartMin = timeStringToMinutes(startTime);
+		let prodEndMin = timeStringToMinutes(endTime);
+
+		// Handle overnight shift
+		if (shiftEndMin <= shiftStartMin) {
+		  shiftEndMin += 1440; // next day
+		  if (prodEndMin <= prodStartMin) {
+			prodEndMin += 1440;
+		  }
+		  if (prodStartMin < shiftStartMin) {
+			prodStartMin += 1440;
+		  }
+		}
+
+		const isValid =
+		  prodStartMin >= shiftStartMin && prodEndMin <= shiftEndMin;
+
+		if (!isValid) {
+		  toast({
+			title: "Invalid Time",
+			description: `Production times must be within shift hours (${selectedShift.start_time} - ${selectedShift.end_time})`,
+			variant: "destructive",
+		  });
+		  return false;
+		}
+	  }
+	  return true;
+	};
 
   const onSubmit = async (data: ScheduleFormData) => {
     if (!validateTimesWithinShift()) {

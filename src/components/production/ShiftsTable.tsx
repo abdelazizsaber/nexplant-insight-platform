@@ -18,6 +18,12 @@ interface ShiftsTableProps {
   shifts: Shift[];
 }
 
+function parseTimeToDate(timeStr: string): Date {
+  const [hours, minutes, seconds] = timeStr.split(":").map(Number);
+  const date = new Date(1970, 0, 1, hours, minutes, seconds);
+  return date;
+}
+
 export function ShiftsTable({ shifts }: ShiftsTableProps) {
   if (shifts.length === 0) {
     return (
@@ -39,19 +45,34 @@ export function ShiftsTable({ shifts }: ShiftsTableProps) {
       </TableHeader>
       <TableBody>
         {shifts.map((shift) => {
-          const startTime = new Date(`1970-01-01T${shift.start_time}`);
-          const endTime = new Date(`1970-01-01T${shift.end_time}`);
-          const duration = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
-          
-          return (
-            <TableRow key={shift.id}>
-              <TableCell className="font-medium">{shift.shift_name}</TableCell>
-              <TableCell>{shift.start_time}</TableCell>
-              <TableCell>{shift.end_time}</TableCell>
-              <TableCell>{duration.toFixed(1)} hours</TableCell>
-            </TableRow>
-          );
-        })}
+		  const isValidTime = shift.start_time && shift.end_time;
+
+		  let duration: number | null = null;
+
+		  if (isValidTime) {
+			const start = parseTimeToDate(shift.start_time);
+			const end = parseTimeToDate(shift.end_time);
+			duration = (end.getTime() - start.getTime()) / 3600000;
+
+			// Handle overnight shift (e.g. 22:00 → 06:00)
+			if (duration < 0) {
+			  duration += 24;
+			}
+		  }
+
+		  return (
+			<TableRow key={shift.id}>
+			  <TableCell className="font-medium">{shift.shift_name}</TableCell>
+			  <TableCell>{shift.start_time}</TableCell>
+			  <TableCell>{shift.end_time}</TableCell>
+			  <TableCell>
+				{duration !== null && !isNaN(duration)
+				  ? `${duration.toFixed(1)} hours`
+				  : <span className="text-muted-foreground italic">Invalid time</span>}
+			  </TableCell>
+			</TableRow>
+		  );
+		})}
       </TableBody>
     </Table>
   );

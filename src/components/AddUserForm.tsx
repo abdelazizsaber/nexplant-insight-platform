@@ -1,4 +1,5 @@
 
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,10 +29,7 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
   const [loading, setLoading] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [formData, setFormData] = useState({
-    email: "",
     username: "",
-    firstName: "",
-    lastName: "",
     company_id: "",
     role: "view_only_user",
     password: ""
@@ -88,10 +86,7 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
       
       setOpen(false);
       setFormData({
-        email: "",
         username: "",
-        firstName: "",
-        lastName: "",
         company_id: user.company_id?.toString() || "",
         role: "view_only_user",
         password: ""
@@ -123,43 +118,13 @@ export function AddUserForm({ user, onUserAdded }: AddUserFormProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
+            <Label htmlFor="username">Email</Label>
             <Input
               id="username"
               value={formData.username}
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               required
             />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
-              <Input
-                id="firstName"
-                value={formData.firstName}
-                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                value={formData.lastName}
-                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                required
-              />
-            </div>
           </div>
           {user.role === "global_admin" && (
             <div className="space-y-2">

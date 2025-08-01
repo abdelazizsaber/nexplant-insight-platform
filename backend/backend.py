@@ -213,7 +213,26 @@ def send_welcome_email(email, company_id, password):
     except Exception as e:
         print(f"Failed to write to file: {e}")
     
-    
+def time_to_minutes(t):
+    return t.hour * 60 + t.minute
+
+def timedelta_to_time(td: timedelta):
+    return (datetime.min + td).time()
+
+def is_within_shift(shift_start, shift_end, prod_start, prod_end):
+    s_start = time_to_minutes(shift_start)
+    s_end = time_to_minutes(shift_end)
+    p_start = time_to_minutes(prod_start)
+    p_end = time_to_minutes(prod_end)
+
+    if s_end <= s_start:  # Overnight shift (e.g., 22:00 → 06:00)
+        s_end += 1440
+        if p_end <= p_start:
+            p_end += 1440
+        if p_start < s_start:
+            p_start += 1440
+
+    return s_start <= p_start and p_end <= s_end    
     
 
 # === AUTHENTICATION ROUTES ===
@@ -371,6 +390,7 @@ def create_company():
         }), 201
 
     except Exception as e:
+        logger.error(e)
         conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
@@ -411,6 +431,7 @@ def register_device():
         }), 201
 
     except Exception as e:
+        logger.error(e)
         return jsonify({"error": str(e)}), 500
     finally:
         if 'conn' in locals():
@@ -437,6 +458,7 @@ def deactivate_company():
         return jsonify({"message": "Company deactivated successfully"}), 200
 
     except Exception as e:
+        logger.error(e)
         conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
@@ -454,6 +476,7 @@ def get_companies():
         companies = cur.fetchall()
         return jsonify(companies), 200
     except Exception as e:
+        logger.error(e)
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
@@ -476,6 +499,7 @@ def handle_users():
             users = cur.fetchall()
             return jsonify(users), 200
         except Exception as e:
+            logger.error(e)
             return jsonify({"error": str(e)}), 500
         finally:
             conn.close()
@@ -507,6 +531,7 @@ def handle_users():
             
             return jsonify({"message": "User created successfully"}), 201
         except Exception as e:
+            logger.error(e)
             conn.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
@@ -618,6 +643,7 @@ def handle_entities():
             
             return jsonify(entities), 200
         except Exception as e:
+            logger.error(e)
             return jsonify({"error": str(e)}), 500
         finally:
             if 'conn' in locals():
@@ -652,6 +678,7 @@ def handle_entities():
             
             return jsonify({"message": "Entity created successfully"}), 201
         except Exception as e:
+            logger.error(e)
             conn.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
@@ -692,6 +719,7 @@ def get_device_data(device_id):
         
         return jsonify(data), 200
     except Exception as e:
+        logger.error(e)
         return jsonify({"error": str(e)}), 500
     finally:
         if 'conn' in locals():
@@ -727,6 +755,7 @@ def handle_shifts():
             
             return jsonify(shifts), 200
         except Exception as e:
+            logger.error(e)
             return jsonify({"error": str(e)}), 500
         finally:
             if 'conn' in locals():
@@ -773,6 +802,7 @@ def handle_shifts():
             
             return jsonify({"message": "Shift created successfully"}), 201
         except Exception as e:
+            logger.error(e)
             conn.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
@@ -839,6 +869,7 @@ def handle_products():
             
             return jsonify({"message": "Product created successfully"}), 201
         except Exception as e:
+            logger.error(e)
             conn.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
@@ -882,8 +913,10 @@ def handle_production_schedule():
                 if 'scheduled_date' in schedule and schedule['scheduled_date']:
                     schedule['scheduled_date'] = str(schedule['scheduled_date'])
             
+            
             return jsonify(schedules), 200
         except Exception as e:
+            logger.error(e)
             return jsonify({"error": str(e)}), 500
         finally:
             if 'conn' in locals():
@@ -917,8 +950,16 @@ def handle_production_schedule():
             if not shift:
                 return jsonify({"error": "Invalid shift"}), 400
             
+            # Shift times from DB are timedelta → convert to time
+            shift_start = timedelta_to_time(shift['start_time'])
+            shift_end = timedelta_to_time(shift['end_time'])
+
+            # Production times from frontend (strings like "09:00")
+            prod_start = datetime.strptime(start_time, "%H:%M").time()
+            prod_end = datetime.strptime(end_time, "%H:%M").time()
+            
             # Check if production times are within shift times
-            if start_time < shift['start_time'] or end_time > shift['end_time']:
+            if not is_within_shift(shift_start, shift_end, prod_start, prod_end):
                 return jsonify({"error": "Production times must be within shift times"}), 400
             
             # Get product rated speed
@@ -929,7 +970,6 @@ def handle_production_schedule():
             
             if is_recurring and start_date and end_date:
                 # Create recurring schedules
-                from datetime import datetime, timedelta
                 current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
                 end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
                 
@@ -963,6 +1003,7 @@ def handle_production_schedule():
             conn.commit()
             return jsonify({"message": "Production schedule created successfully"}), 201
         except Exception as e:
+            logger.error(e)
             conn.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
