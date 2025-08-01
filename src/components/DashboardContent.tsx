@@ -21,20 +21,19 @@ interface DashboardContentProps {
 }
 
 interface Company {
-  id: string;
-  name: string;
-  status: string;
+  company_id: string;
+  company_name: string;
+  company_status: string;
   device_count?: number;
   user_count?: number;
 }
 
 interface Device {
-  id: string;
-  name: string;
   device_id: string;
+  device_name: string;
   device_type: string;
   company_name?: string;
-  status: string;
+  device_status: string;
   last_data?: string;
 }
 
@@ -43,7 +42,7 @@ interface UserData {
   username: string;
   role: string;
   company_name?: string;
-  status: string;
+  user_status: string;
   last_connection?: string;
 }
 
@@ -202,9 +201,9 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
     }
 
     // Company admin and user dashboard
-    const connectedDevices = devices.filter(d => d.status === "connected").length;
+    const connectedDevices = devices.filter(d => d.device_status === "connected").length;
     const totalDevices = devices.length;
-    const activeUsers = users.filter(u => u.status === "active").length;
+    const activeUsers = users.filter(u => u.user_status === "active").length;
 
     return (
       <div className="space-y-6">
@@ -276,7 +275,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
             </div>
             <div className="grid gap-4">
               {companies.map((company) => (
-                <Card key={company.id}>
+                <Card key={company.company_id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       {company.company_name}
@@ -320,8 +319,8 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
                           userData.user_status === "Online" 
                             ? "text-green-600 bg-green-100" 
                             : "text-gray-600 bg-gray-100"
-                        }`}>
-                          {userData.status}
+                         }`}>
+                          {userData.user_status}
                         </span>
                       </div>
                     </CardTitle>
@@ -345,7 +344,7 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
             </div>
             <div className="grid gap-4">
               {devices.map((device) => (
-                <Card key={device.id}>
+                <Card key={device.device_id}>
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
                       {device.device_name}
