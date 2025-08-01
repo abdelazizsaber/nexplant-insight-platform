@@ -26,26 +26,49 @@ interface ProductionScheduleTableProps {
 export function ProductionScheduleTable({ schedules }: ProductionScheduleTableProps) {
   const getCurrentScheduleStatus = (schedule: Schedule) => {
     const now = new Date();
-    const scheduleDate = new Date(schedule.scheduled_date);
-    const startTime = new Date(`${schedule.scheduled_date}T${schedule.start_time}`);
-    const endTime = new Date(`${schedule.scheduled_date}T${schedule.end_time}`);
+    const today = now.toISOString().split('T')[0]; // Get YYYY-MM-DD format
     
-    // Check if it's the same date
-    if (scheduleDate.toDateString() === now.toDateString()) {
-      if (now >= startTime && now <= endTime) {
+    // Parse schedule date and times more reliably
+    const scheduleDate = schedule.scheduled_date;
+    const currentTime = now.getHours() * 60 + now.getMinutes(); // Current time in minutes
+    
+    // Parse start and end times to minutes
+    const [startHour, startMin] = schedule.start_time.split(':').map(Number);
+    const [endHour, endMin] = schedule.end_time.split(':').map(Number);
+    const startTimeMinutes = startHour * 60 + startMin;
+    let endTimeMinutes = endHour * 60 + endMin;
+    
+    // Handle overnight shifts (end time next day)
+    if (endTimeMinutes <= startTimeMinutes) {
+      endTimeMinutes += 24 * 60; // Add 24 hours in minutes
+    }
+    
+    // Check if it's today's date
+    if (scheduleDate === today) {
+      // Handle overnight shift for current time comparison
+      let currentTimeAdjusted = currentTime;
+      if (endTimeMinutes > 24 * 60 && currentTime < 12 * 60) {
+        // If it's an overnight shift and current time is in early morning, add 24 hours
+        currentTimeAdjusted += 24 * 60;
+      }
+      
+      if (currentTimeAdjusted >= startTimeMinutes && currentTimeAdjusted <= endTimeMinutes) {
         return 'current';
-      } else if (now < startTime) {
-        // Check if it's the next upcoming schedule today
-        const todaySchedules = schedules.filter(s => 
-          new Date(s.scheduled_date).toDateString() === now.toDateString() &&
-          new Date(`${s.scheduled_date}T${s.start_time}`) > now
-        );
-        const nextSchedule = todaySchedules.sort((a, b) => 
-          new Date(`${a.scheduled_date}T${a.start_time}`).getTime() - 
-          new Date(`${b.scheduled_date}T${b.start_time}`).getTime()
-        )[0];
+      } else if (currentTimeAdjusted < startTimeMinutes) {
+        // Find the next upcoming schedule today
+        const todaySchedules = schedules
+          .filter(s => s.scheduled_date === today)
+          .map(s => {
+            const [sHour, sMin] = s.start_time.split(':').map(Number);
+            return {
+              ...s,
+              startMinutes: sHour * 60 + sMin
+            };
+          })
+          .filter(s => s.startMinutes > currentTime)
+          .sort((a, b) => a.startMinutes - b.startMinutes);
         
-        if (nextSchedule && nextSchedule.schedule_id === schedule.schedule_id) {
+        if (todaySchedules.length > 0 && todaySchedules[0].schedule_id === schedule.schedule_id) {
           return 'next';
         }
       }
