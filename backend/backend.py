@@ -1084,7 +1084,7 @@ def get_oee_data():
             
             # Calculate duration in hours for rated count
             duration = (calc_end - calc_start).total_seconds() / 3600  # hours
-            rated_count = schedule['rated_speed'] * duration if duration > 0 else 0
+            rated_count = float(schedule['rated_speed']) * duration if duration > 0 else 0
             
             # Calculate OEE percentage
             oee_percentage = (total_count / rated_count * 100) if rated_count > 0 else 0
