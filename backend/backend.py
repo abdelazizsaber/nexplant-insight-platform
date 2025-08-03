@@ -1010,5 +1010,313 @@ def handle_production_schedule():
             if 'conn' in locals():
                 conn.close()
 
+# Production Dashboard Routes
+@app.route('/api/production-dashboard/oee', methods=['GET'])
+@session_required
+def get_oee_data():
+    user = session['user']
+    company_id = request.args.get('company_id')
+    
+    if user['role'] not in ['company_admin', 'view_only_user']:
+        return jsonify({"error": "Insufficient permissions"}), 403
+    
+    if user['role'] == 'company_admin' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    if user['role'] == 'view_only_user' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    try:
+        conn = get_company_db(company_id)
+        cur = conn.cursor(dictionary=True)
+        
+        # Get current time and date
+        now = datetime.now()
+        current_date = now.date()
+        current_time = now.time()
+        
+        # Get active schedules for today
+        cur.execute("""
+            SELECT ps.*, d.device_name, p.product_name, s.shift_name, s.start_time, s.end_time
+            FROM production_schedule ps
+            LEFT JOIN devices d ON ps.device_id = d.device_id
+            LEFT JOIN products p ON ps.product_id = p.id
+            LEFT JOIN shifts s ON ps.shift_id = s.id
+            WHERE ps.scheduled_date = %s
+        """, (current_date,))
+        schedules = cur.fetchall()
+        
+        oee_data = []
+        
+        for schedule in schedules:
+            # Determine shift start time for today
+            shift_start = timedelta_to_time(schedule['start_time'])
+            shift_end = timedelta_to_time(schedule['end_time'])
+            
+            # Create datetime objects for shift boundaries
+            shift_start_dt = datetime.combine(current_date, shift_start)
+            shift_end_dt = datetime.combine(current_date, shift_end)
+            
+            # Handle overnight shifts
+            if shift_end < shift_start:
+                if current_time < shift_start:
+                    # We're in the early morning, shift started yesterday
+                    shift_start_dt = datetime.combine(current_date - timedelta(days=1), shift_start)
+                else:
+                    # Shift ends tomorrow
+                    shift_end_dt = datetime.combine(current_date + timedelta(days=1), shift_end)
+            
+            # Determine actual calculation period
+            calc_start = shift_start_dt
+            calc_end = min(now, shift_end_dt)  # Don't go beyond current time or shift end
+            
+            # Get device data from shift start until now
+            cur.execute("""
+                SELECT SUM(device_data) as total_count
+                FROM data 
+                WHERE device_id = %s 
+                AND timestamp >= %s 
+                AND timestamp <= %s
+            """, (schedule['device_id'], calc_start, calc_end))
+            
+            result = cur.fetchone()
+            total_count = result['total_count'] if result and result['total_count'] else 0
+            
+            # Calculate duration in hours for rated count
+            duration = (calc_end - calc_start).total_seconds() / 3600  # hours
+            rated_count = schedule['rated_speed'] * duration if duration > 0 else 0
+            
+            # Calculate OEE percentage
+            oee_percentage = (total_count / rated_count * 100) if rated_count > 0 else 0
+            oee_percentage = min(oee_percentage, 100)  # Cap at 100%
+            
+            oee_data.append({
+                'device_id': schedule['device_id'],
+                'device_name': schedule['device_name'],
+                'product_name': schedule['product_name'],
+                'oee_percentage': round(oee_percentage, 1),
+                'total_count': int(total_count),
+                'rated_count': int(rated_count),
+                'shift_name': schedule['shift_name']
+            })
+        
+        return jsonify(oee_data), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting OEE data: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/production-dashboard/timeseries', methods=['GET'])
+@session_required
+def get_timeseries_data():
+    user = session['user']
+    company_id = request.args.get('company_id')
+    days = int(request.args.get('days', 1))
+    
+    # Limit to maximum 7 days
+    days = min(days, 7)
+    
+    if user['role'] not in ['company_admin', 'view_only_user']:
+        return jsonify({"error": "Insufficient permissions"}), 403
+    
+    if user['role'] == 'company_admin' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    if user['role'] == 'view_only_user' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    try:
+        conn = get_company_db(company_id)
+        cur = conn.cursor(dictionary=True)
+        
+        # Calculate date range
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=days)
+        
+        # Get devices for this company
+        cur.execute("SELECT device_id, device_name FROM devices")
+        devices = cur.fetchall()
+        
+        timeseries_data = []
+        
+        for device in devices:
+            # Get recent device data with rated speed from current schedule
+            cur.execute("""
+                SELECT 
+                    d.timestamp,
+                    d.device_data,
+                    COALESCE(ps.rated_speed, p.rated_speed) as rated_speed,
+                    dev.device_name
+                FROM data d
+                LEFT JOIN devices dev ON d.device_id = dev.device_id
+                LEFT JOIN production_schedule ps ON d.device_id = ps.device_id 
+                    AND DATE(d.timestamp) = ps.scheduled_date
+                LEFT JOIN products p ON ps.product_id = p.id
+                WHERE d.device_id = %s 
+                AND d.timestamp >= %s 
+                AND d.timestamp <= %s
+                ORDER BY d.timestamp DESC
+                LIMIT 1000
+            """, (device['device_id'], start_time, end_time))
+            
+            device_data = cur.fetchall()
+            
+            for row in device_data:
+                timeseries_data.append({
+                    'timestamp': row['timestamp'].isoformat(),
+                    'device_data': row['device_data'],
+                    'rated_speed': row['rated_speed'] if row['rated_speed'] else 0,
+                    'device_name': row['device_name']
+                })
+        
+        return jsonify(timeseries_data), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting timeseries data: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/production-dashboard/downtime', methods=['GET'])
+@session_required
+def get_downtime_data():
+    user = session['user']
+    company_id = request.args.get('company_id')
+    threshold = float(request.args.get('threshold', 50))  # Percentage of rated speed
+    
+    if user['role'] not in ['company_admin', 'view_only_user']:
+        return jsonify({"error": "Insufficient permissions"}), 403
+    
+    if user['role'] == 'company_admin' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    if user['role'] == 'view_only_user' and str(user['company_id']) != company_id:
+        return jsonify({"error": "Access denied"}), 403
+    
+    try:
+        conn = get_company_db(company_id)
+        cur = conn.cursor(dictionary=True)
+        
+        # Get devices
+        cur.execute("SELECT device_id, device_name FROM devices")
+        devices = cur.fetchall()
+        
+        downtime_data = []
+        
+        # Look back 24 hours for downtime analysis
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=24)
+        
+        for device in devices:
+            # Get device data for the last 24 hours
+            cur.execute("""
+                SELECT 
+                    d.timestamp,
+                    d.device_data,
+                    COALESCE(ps.rated_speed, p.rated_speed, 100) as rated_speed
+                FROM data d
+                LEFT JOIN production_schedule ps ON d.device_id = ps.device_id 
+                    AND DATE(d.timestamp) = ps.scheduled_date
+                LEFT JOIN products p ON ps.product_id = p.id
+                WHERE d.device_id = %s 
+                AND d.timestamp >= %s 
+                AND d.timestamp <= %s
+                ORDER BY d.timestamp
+            """, (device['device_id'], start_time, end_time))
+            
+            device_data = cur.fetchall()
+            
+            if not device_data:
+                continue
+            
+            # Analyze for zero production periods
+            zero_start = None
+            below_threshold_start = None
+            
+            for i, row in enumerate(device_data):
+                # Check for zero production
+                if row['device_data'] == 0:
+                    if zero_start is None:
+                        zero_start = row['timestamp']
+                else:
+                    if zero_start is not None:
+                        # End of zero production period
+                        duration = (row['timestamp'] - zero_start).total_seconds() / 60  # minutes
+                        if duration >= 5:  # Only report periods > 5 minutes
+                            downtime_data.append({
+                                'device_id': device['device_id'],
+                                'device_name': device['device_name'],
+                                'start_time': zero_start.isoformat(),
+                                'end_time': row['timestamp'].isoformat(),
+                                'duration_minutes': int(duration),
+                                'type': 'zero_production'
+                            })
+                        zero_start = None
+                
+                # Check for below threshold performance
+                threshold_value = row['rated_speed'] * (threshold / 100)
+                if 0 < row['device_data'] < threshold_value:
+                    if below_threshold_start is None:
+                        below_threshold_start = row['timestamp']
+                else:
+                    if below_threshold_start is not None:
+                        # End of below threshold period
+                        duration = (row['timestamp'] - below_threshold_start).total_seconds() / 60
+                        if duration >= 10:  # Only report periods > 10 minutes
+                            downtime_data.append({
+                                'device_id': device['device_id'],
+                                'device_name': device['device_name'],
+                                'start_time': below_threshold_start.isoformat(),
+                                'end_time': row['timestamp'].isoformat(),
+                                'duration_minutes': int(duration),
+                                'type': 'below_threshold',
+                                'threshold_value': int(threshold_value)
+                            })
+                        below_threshold_start = None
+            
+            # Handle ongoing periods
+            if zero_start is not None:
+                duration = (end_time - zero_start).total_seconds() / 60
+                if duration >= 5:
+                    downtime_data.append({
+                        'device_id': device['device_id'],
+                        'device_name': device['device_name'],
+                        'start_time': zero_start.isoformat(),
+                        'end_time': end_time.isoformat(),
+                        'duration_minutes': int(duration),
+                        'type': 'zero_production'
+                    })
+            
+            if below_threshold_start is not None:
+                duration = (end_time - below_threshold_start).total_seconds() / 60
+                if duration >= 10:
+                    last_rated_speed = device_data[-1]['rated_speed'] if device_data else 100
+                    threshold_value = last_rated_speed * (threshold / 100)
+                    downtime_data.append({
+                        'device_id': device['device_id'],
+                        'device_name': device['device_name'],
+                        'start_time': below_threshold_start.isoformat(),
+                        'end_time': end_time.isoformat(),
+                        'duration_minutes': int(duration),
+                        'type': 'below_threshold',
+                        'threshold_value': int(threshold_value)
+                    })
+        
+        # Sort by start time
+        downtime_data.sort(key=lambda x: x['start_time'], reverse=True)
+        
+        return jsonify(downtime_data), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting downtime data: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

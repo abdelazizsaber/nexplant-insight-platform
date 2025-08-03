@@ -210,6 +210,19 @@ class ApiClient {
       body: JSON.stringify(scheduleData),
     });
   }
+
+  // Production dashboard endpoints
+  async getOEEData(companyId: string) {
+    return this.request(`/api/production-dashboard/oee?company_id=${companyId}`);
+  }
+
+  async getTimeseriesData(companyId: string, days: number = 1) {
+    return this.request(`/api/production-dashboard/timeseries?company_id=${companyId}&days=${days}`);
+  }
+
+  async getDowntimeData(companyId: string, thresholdPercentage: number = 50) {
+    return this.request(`/api/production-dashboard/downtime?company_id=${companyId}&threshold=${thresholdPercentage}`);
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

@@ -8,6 +8,7 @@ import { CreateCompanyForm } from "./CreateCompanyForm";
 import { RegisterDeviceForm } from "./RegisterDeviceForm";
 import { AddUserForm } from "./AddUserForm";
 import { ProductionView } from "./production/ProductionView";
+import { ProductionDashboard } from "./production/ProductionDashboard";
 
 interface User {
   username: string;
@@ -410,6 +411,9 @@ export function DashboardContent({ user, currentView }: DashboardContentProps) {
 
       case "production":
         return <ProductionView user={user} />;
+
+      case "production-dashboards":
+        return <ProductionDashboard user={user} />;
 
       default:
         return renderDashboard();

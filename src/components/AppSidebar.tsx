@@ -1,5 +1,5 @@
 
-import { Building2, Users, Monitor, Settings, BarChart3, LogOut, Home } from "lucide-react";
+import { Building2, Users, Monitor, Settings, BarChart3, LogOut, Home, Gauge } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Sidebar,
@@ -83,6 +83,11 @@ export function AppSidebar({ user, currentView, setCurrentView }: AppSidebarProp
       return [
         ...baseItems,
         {
+          title: "Production dashboards",
+          icon: Gauge,
+          id: "production-dashboards"
+        },
+        {
           title: "Production",
           icon: Settings,
           id: "production"
@@ -108,6 +113,11 @@ export function AppSidebar({ user, currentView, setCurrentView }: AppSidebarProp
     // Regular user (view_only_user)
     return [
       ...baseItems,
+      {
+        title: "Production dashboards",
+        icon: Gauge,
+        id: "production-dashboards"
+      },
       {
         title: "Production",
         icon: Settings,
