@@ -273,8 +273,9 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                             }}
                             interval="preserveStartEnd"
                             minTickGap={50}
+                            className="text-foreground"
                           />
-                          <YAxis />
+                          <YAxis domain={[0, 'dataMax']} className="text-foreground" />
                           <ChartTooltip content={<ChartTooltipContent />} />
                           <Legend />
                           <Line 
