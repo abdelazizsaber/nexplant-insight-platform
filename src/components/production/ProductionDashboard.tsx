@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,10 +20,12 @@ interface ProductionDashboardProps {
 }
 
 interface OEEData {
-  device_id: string;
+  schedule_name: string;
   device_name: string;
   product_name: string;
   oee_percentage: number;
+  performance: number;
+  availability: number;
   total_count: number;
   rated_count: number;
   shift_name: string;
@@ -31,18 +34,17 @@ interface OEEData {
 interface TimeseriesData {
   timestamp: string;
   device_data: number;
-  rated_speed: number;
   device_name: string;
 }
 
 interface DowntimeData {
-  device_id: string;
+  shift_name: string;
+  product_name: string;
   device_name: string;
   start_time: string;
   end_time: string;
   duration_minutes: number;
-  type: 'zero_production' | 'below_threshold';
-  threshold_value?: number;
+  details: string;
 }
 
 const OEEGauge = ({ percentage, title }: { percentage: number; title: string }) => {
@@ -157,18 +159,23 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
             Overall Equipment Effectiveness (OEE)
           </CardTitle>
           <CardDescription>
-            Real-time OEE calculation per device and product
+            Real-time OEE calculation per schedule
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {oeeData.map((device) => (
-              <Card key={device.device_id} className="p-4">
+              <Card key={device.schedule_name} className="p-4">
                 <OEEGauge 
                   percentage={device.oee_percentage} 
-                  title={device.device_name}
+                  title={device.schedule_name}
                 />
+				
                 <div className="mt-4 space-y-2 text-sm">
+				  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Device:</span>
+                    <span className="font-medium">{device.device_name}</span>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Product:</span>
                     <span className="font-medium">{device.product_name}</span>
@@ -176,6 +183,14 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Shift:</span>
                     <span className="font-medium">{device.shift_name}</span>
+                  </div>
+				  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Performance (%):</span>
+                    <span className="font-medium">{device.performance.toLocaleString()}</span>
+                  </div>
+				  <div className="flex justify-between">
+                    <span className="text-muted-foreground">availability (%):</span>
+                    <span className="font-medium">{device.availability.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Total Count:</span>
@@ -222,11 +237,7 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                     config={{
                       device_data: {
                         label: "Actual Data",
-                        color: "hsl(var(--chart-1))",
-                      },
-                      rated_speed: {
-                        label: "Rated Speed",
-                        color: "hsl(var(--chart-2))",
+                        color: "#8884d8",
                       },
                     }}
                   >
@@ -243,17 +254,9 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                         <Line 
                           type="monotone" 
                           dataKey="device_data" 
-                          stroke="var(--color-device_data)" 
+                          stroke="#8884d8" 
                           strokeWidth={2}
                           name="Actual Data"
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="rated_speed" 
-                          stroke="var(--color-rated_speed)" 
-                          strokeWidth={2}
-                          strokeDasharray="5 5"
-                          name="Rated Speed"
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -282,7 +285,8 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
               <thead>
                 <tr className="border-b">
                   <th className="text-left p-2">Device</th>
-                  <th className="text-left p-2">Type</th>
+				  <th className="text-left p-2">Product</th>
+				  <th className="text-left p-2">Shift</th>
                   <th className="text-left p-2">Start Time</th>
                   <th className="text-left p-2">End Time</th>
                   <th className="text-left p-2">Duration</th>
@@ -293,11 +297,8 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                 {downtimeData.map((item, index) => (
                   <tr key={index} className="border-b hover:bg-muted/50">
                     <td className="p-2 font-medium">{item.device_name}</td>
-                    <td className="p-2">
-                      <Badge variant={item.type === 'zero_production' ? 'destructive' : 'secondary'}>
-                        {item.type === 'zero_production' ? 'Zero Production' : 'Below Threshold'}
-                      </Badge>
-                    </td>
+					<td className="p-2">{item.product_name}</td>
+					<td className="p-2">{item.shift_name}</td>
                     <td className="p-2">{new Date(item.start_time).toLocaleString()}</td>
                     <td className="p-2">{new Date(item.end_time).toLocaleString()}</td>
                     <td className="p-2">
@@ -306,13 +307,7 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                         {Math.floor(item.duration_minutes / 60)}h {item.duration_minutes % 60}m
                       </div>
                     </td>
-                    <td className="p-2">
-                      {item.type === 'below_threshold' && item.threshold_value && (
-                        <span className="text-sm text-muted-foreground">
-                          Threshold: {item.threshold_value}
-                        </span>
-                      )}
-                    </td>
+					<td className="p-2">{item.details}</td>
                   </tr>
                 ))}
               </tbody>

@@ -5,7 +5,7 @@ import mysql.connector
 import os
 import random
 import string
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, date
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 import smtplib
@@ -13,6 +13,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 import logging
+from collections import defaultdict
 
 
 app = Flask(__name__)
@@ -166,13 +167,30 @@ def create_company_database_schema(company_id):
         cur.execute("""
             CREATE TABLE production_schedule (
                 schedule_id INT AUTO_INCREMENT PRIMARY KEY,
+                schedule_name VARCHAR(255) UNIQUE NOT NULL,
                 device_id VARCHAR(255),
                 product_id INT,
                 rated_speed DECIMAL(10,2),
                 shift_id INT,
-                scheduled_date DATE,
-                start_time TIME,
-                end_time TIME,
+                modification_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                start_datetime DATETIME,
+                end_datetime DATETIME,
+                FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create downtime table
+        cur.execute("""
+            CREATE TABLE production_downtime (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                device_id VARCHAR(255),
+                product_id INT,
+                shift_id INT,
+                start_datetime DATETIME,
+                end_datetime DATETIME,
+                comment TEXT,
                 FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE,
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
                 FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE
@@ -234,6 +252,216 @@ def is_within_shift(shift_start, shift_end, prod_start, prod_end):
 
     return s_start <= p_start and p_end <= s_end    
     
+def get_current_shift_boundry_timestamps(company_id):
+    """
+    Get the current operating shift start time from the shifts table, handling midnight crossings.
+    
+    Args:
+        company_id (): the company ID
+        
+    Returns:
+        dict: The current shift record or None if no matching shift found
+    """
+    try:
+        # Connect to MySQL database
+        conn = get_company_db(company_id)
+        cur = conn.cursor(dictionary=True)
+        
+        # Get used datetime
+        now = datetime.now().time()
+        today = datetime.now().date()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+        midnight = datetime.strptime('00:00:00', "%H:%M:%S").time()
+        
+        # Query all shifts from the database
+        cur.execute("SELECT * FROM shifts")
+        shifts = cur.fetchall()
+        
+        # Find the current shift
+        for shift in shifts:
+            # Convert MySQL timedelta to time object
+            start_time = (datetime.min + shift['start_time']).time()
+            end_time = (datetime.min + shift['end_time']).time()
+            
+            # Handle shifts that cross midnight
+            if start_time > end_time:
+                # Current shift if now >= start_time OR now < end_time
+                if now >= start_time or now < end_time:
+                    if now >= midnight:
+                        # We are already after midnight, we need to indicate yesterday date for start and today for end
+                        shift_start_timestamp = datetime.combine(yesterday, start_time)
+                        shift_end_timestamp = datetime.combine(today, end_time)
+                    else:
+                        # We are still before midnight, we need to indicate today date for start and tomorrow for end
+                        shift_start_timestamp = datetime.combine(today, start_time)
+                        shift_end_timestamp = datetime.combine(tomorrow, end_time)
+                        
+                    return {
+                        'start_timestamp': shift_start_timestamp,
+                        'end_timestamp': shift_end_timestamp,
+                    }
+            else:
+                # Normal shift (not crossing midnight)
+                if start_time <= now < end_time:
+                    shift_start_timestamp = datetime.combine(today, start_time)
+                    shift_end_timestamp = datetime.combine(today, end_time)
+                    return {
+                        'start_timestamp': shift_start_timestamp,
+                        'end_timestamp': shift_end_timestamp,
+                    }
+        
+        return None  # No matching shift found
+        
+    except mysql.connector.Error as err:
+        print(f"Database error: {err}")
+        return None
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cur.close()
+            conn.close()
+            
+def calculate_downtime(company_id, min_downtime_minutes=5):
+    """
+    Calculate downtime per production schedule
+    Insert downtime periods into production_downtime table.
+    """
+    try:
+        conn = get_company_db(company_id)
+        cur = conn.cursor(dictionary=True)
+
+        # Get all active and past schedules
+        cur.execute("""
+            SELECT ps.*, d.device_name, p.product_name, s.shift_name
+            FROM production_schedule ps
+            JOIN devices d ON ps.device_id = d.device_id
+            JOIN products p ON ps.product_id = p.id
+            JOIN shifts s ON ps.shift_id = s.id
+            WHERE ps.start_datetime <= NOW()
+            ORDER BY ps.device_id, ps.start_datetime
+        """)
+        schedules = cur.fetchall()
+        if not schedules:
+            return True
+
+        downtime_records = []
+
+        for schedule in schedules:
+            device_id = schedule['device_id']
+            product_id = schedule['product_id']
+            shift_id = schedule['shift_id']
+            start_dt = schedule['start_datetime']
+            end_dt = min(datetime.now(), schedule['end_datetime'])
+
+            # Get data for this schedule time range         
+            cur.execute("""
+            SELECT device_id, timestamp, device_data
+            FROM data
+            WHERE device_id = (%s)
+            AND timestamp BETWEEN %s AND %s
+            ORDER BY device_id, timestamp
+            """ , (device_id, start_dt, end_dt))
+            
+            device_data_points = cur.fetchall()
+            
+            if not device_data_points:
+                downtime_minutes = (end_dt - start_dt).total_seconds() / 60
+                if downtime_minutes >= min_downtime_minutes:
+                    downtime_records.append({
+                        "device_id": device_id,
+                        "product_id": product_id,
+                        "shift_id": shift_id,
+                        "start_time": start_dt,
+                        "end_time": end_dt,
+                        "minutes": downtime_minutes,
+                        "reason": "No data in scheduled period"
+                    })
+
+            else:
+                
+                # Downtime detection
+                current_downtime_start = None
+                prev_timestamp = None
+                prev_value = None
+
+                for point in device_data_points:
+                    timestamp = point['timestamp']
+                    value = point['device_data']
+
+                    # Detect missing data gaps
+                    if prev_timestamp:
+                        gap_minutes = (timestamp - prev_timestamp).total_seconds() / 60
+                        if gap_minutes >= min_downtime_minutes:
+                            downtime_records.append({
+                                "device_id": device_id,
+                                "product_id": product_id,
+                                "shift_id": shift_id,
+                                "start_time": prev_timestamp,
+                                "end_time": timestamp,
+                                "minutes": gap_minutes,
+                                "reason": "Data gap"
+                            })
+
+                    # Detect zero-value downtime
+                    if value == 0 and (prev_value is None or prev_value > 0):
+                        current_downtime_start = timestamp
+                    elif value > 0 and current_downtime_start is not None:
+                        downtime_minutes = (timestamp - current_downtime_start).total_seconds() / 60
+                        if downtime_minutes >= min_downtime_minutes:
+                            downtime_records.append({
+                                "device_id": device_id,
+                                "product_id": product_id,
+                                "shift_id": shift_id,
+                                "start_time": current_downtime_start,
+                                "end_time": timestamp,
+                                "minutes": downtime_minutes,
+                                "reason": "Zero output"
+                            })
+                        current_downtime_start = None
+
+                    prev_timestamp = timestamp
+                    prev_value = value
+
+                # Handle downtime still ongoing at schedule end
+                if current_downtime_start is not None:
+                    downtime_minutes = (end_dt - current_downtime_start).total_seconds() / 60
+                    if downtime_minutes >= min_downtime_minutes:
+                        downtime_records.append({
+                            "device_id": device_id,
+                            "product_id": product_id,
+                            "shift_id": shift_id,
+                            "start_time": current_downtime_start,
+                            "end_time": end_dt,
+                            "minutes": downtime_minutes,
+                            "reason": "Ongoing downtime"
+                        })
+
+            # Insert downtime into DB
+            for rec in downtime_records:          
+                # Check if record exists
+                cur.execute("""
+                SELECT * FROM production_downtime
+                WHERE device_id = %s AND product_id = %s AND shift_id = %s
+                AND start_datetime = %s AND end_datetime = %s
+                """, (rec['device_id'], rec['product_id'], rec['shift_id'],rec['start_time'], rec['end_time']))
+            
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO production_downtime
+                        (device_id, product_id, shift_id, start_datetime, end_datetime, comment)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (rec['device_id'], rec['product_id'], rec['shift_id'], rec['start_time'], rec['end_time'], rec['reason']))
+                    conn.commit()    
+
+        return True
+
+    except mysql.connector.Error as e:
+        logger.error(e)
+        return False
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cur.close()
+            conn.close()
 
 # === AUTHENTICATION ROUTES ===
 @app.route('/api/auth/login', methods=['POST'])
@@ -895,24 +1123,32 @@ def handle_production_schedule():
             
             cur.execute("""
                 SELECT ps.*, d.device_name, p.product_name, s.shift_name,
-                       p.rated_speed as product_rated_speed
+                       p.rated_speed as product_rated_speed,
+                       CASE 
+                           WHEN ps.start_datetime <= NOW() AND ps.end_datetime >= NOW() THEN 'current'
+                           WHEN ps.start_datetime > NOW() AND NOT EXISTS (
+                               SELECT 1 FROM production_schedule 
+                               WHERE start_datetime > NOW() 
+                               AND start_datetime < ps.start_datetime
+                           ) THEN 'next'
+                           ELSE 'normal'
+                       END as status
                 FROM production_schedule ps
                 LEFT JOIN devices d ON ps.device_id = d.device_id
                 LEFT JOIN products p ON ps.product_id = p.id
                 LEFT JOIN shifts s ON ps.shift_id = s.id
-                ORDER BY ps.scheduled_date, ps.start_time
+                ORDER BY ps.start_datetime
             """)
             schedules = cur.fetchall()
             
             # Convert timedelta objects to strings for JSON serialization
             for schedule in schedules:
-                if 'start_time' in schedule and schedule['start_time']:
-                    schedule['start_time'] = str(schedule['start_time'])
-                if 'end_time' in schedule and schedule['end_time']:
-                    schedule['end_time'] = str(schedule['end_time'])
-                if 'scheduled_date' in schedule and schedule['scheduled_date']:
-                    schedule['scheduled_date'] = str(schedule['scheduled_date'])
-            
+                if 'start_datetime' in schedule and schedule['start_datetime']:
+                    schedule['start_datetime'] = str(schedule['start_datetime'])
+                if 'end_datetime' in schedule and schedule['end_datetime']:
+                    schedule['end_datetime'] = str(schedule['end_datetime'])
+                if 'modification_date' in schedule and schedule['modification_date']:
+                    schedule['modification_date'] = str(schedule['modification_date'])
             
             return jsonify(schedules), 200
         except Exception as e:
@@ -927,6 +1163,7 @@ def handle_production_schedule():
             return jsonify({"error": "Only company admin can create production schedules"}), 403
         
         data = request.json
+        schedule_name = data.get('schedule_name')
         device_id = data.get('device_id')
         product_id = data.get('product_id')
         shift_id = data.get('shift_id')
@@ -937,7 +1174,7 @@ def handle_production_schedule():
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         
-        if not all([device_id, product_id, shift_id, scheduled_date, start_time, end_time]):
+        if not all([schedule_name, device_id, product_id, shift_id, scheduled_date, start_time, end_time]):
             return jsonify({"error": "Missing required fields"}), 400
         
         try:
@@ -968,37 +1205,61 @@ def handle_production_schedule():
             if not product:
                 return jsonify({"error": "Invalid product"}), 400
             
+            # Create the time the table modified
+            modification_date = datetime.now()
+            
             if is_recurring and start_date and end_date:
-                # Create recurring schedules
-                current_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-                
+                # Create recurring schedules              
                 schedule_id = 1
                 cur.execute("SELECT COALESCE(MAX(schedule_id), 0) + 1 as next_id FROM production_schedule")
                 next_id = cur.fetchone()['next_id']
                 
-                while current_date <= end_date_obj:
+                # Create datetime objects for production schedule
+                prod_start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                prod_end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+                prod_start_dt = datetime.combine(prod_start_date, prod_start)
+                                
+                while prod_start_date <= prod_end_date:   
+
+                    # Handle overnight schedules
+                    if prod_end < prod_start:
+                        prod_end_dt = datetime.combine(prod_start_date + timedelta(days=1), prod_end)
+                    else:
+                        prod_end_dt = datetime.combine(prod_start_date, prod_end)
+                    
                     cur.execute("""
                         INSERT INTO production_schedule 
-                        (schedule_id, device_id, product_id, rated_speed, shift_id, 
-                         scheduled_date, start_time, end_time)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (next_id, device_id, product_id, product['rated_speed'], 
-                          shift_id, current_date, start_time, end_time))
-                    current_date += timedelta(days=1)
+                        (schedule_id, schedule_name, device_id, product_id, rated_speed, shift_id, 
+                         modification_date, start_datetime, end_datetime)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (next_id, schedule_name, device_id, product_id, product['rated_speed'], 
+                          shift_id, modification_date, prod_start_dt, prod_end_dt))
+                    
+                    prod_start_date += timedelta(days=1)                 
+                    prod_start_dt += timedelta(days=1)
                     next_id += 1
             else:
                 # Create single schedule
                 cur.execute("SELECT COALESCE(MAX(schedule_id), 0) + 1 as next_id FROM production_schedule")
                 next_id = cur.fetchone()['next_id']
                 
+                 # Create datetime objects for production schedule
+                prod_start_date = datetime.strptime(scheduled_date, '%Y-%m-%d').date()
+                prod_start_dt = datetime.combine(prod_start_date, prod_start)
+                
+                # Handle overnight schedules
+                if prod_end < prod_start:
+                    prod_end_dt = datetime.combine(prod_start_date + timedelta(days=1), prod_end)
+                else:
+                    prod_end_dt = datetime.combine(prod_start_date, prod_end)
+                
                 cur.execute("""
                     INSERT INTO production_schedule 
                     (schedule_id, device_id, product_id, rated_speed, shift_id, 
-                     scheduled_date, start_time, end_time)
+                     modification_date, start_datetime, end_datetime)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (next_id, device_id, product_id, product['rated_speed'], 
-                      shift_id, scheduled_date, start_time, end_time))
+                      shift_id, modification_date, prod_start_dt, prod_end_dt))
             
             conn.commit()
             return jsonify({"message": "Production schedule created successfully"}), 201
@@ -1032,74 +1293,73 @@ def get_oee_data():
         
         # Get current time and date
         now = datetime.now()
-        current_date = now.date()
-        current_time = now.time()
         
-        # Get active schedules for today
+        # Get all active schedules
         cur.execute("""
-            SELECT ps.*, d.device_name, p.product_name, s.shift_name, s.start_time, s.end_time
+            SELECT ps.*, d.device_name, p.product_name, s.shift_name , p.rated_speed
             FROM production_schedule ps
-            LEFT JOIN devices d ON ps.device_id = d.device_id
-            LEFT JOIN products p ON ps.product_id = p.id
-            LEFT JOIN shifts s ON ps.shift_id = s.id
-            WHERE ps.scheduled_date = %s
-        """, (current_date,))
+            JOIN devices d ON ps.device_id = d.device_id
+            JOIN products p ON ps.product_id = p.id
+            JOIN shifts s ON ps.shift_id = s.id
+            WHERE ps.start_datetime <= NOW() AND ps.end_datetime >= NOW()
+            ORDER BY ps.device_id, ps.start_datetime
+        """)
         schedules = cur.fetchall()
         
         oee_data = []
         
-        for schedule in schedules:
-            # Determine shift start time for today
-            shift_start = timedelta_to_time(schedule['start_time'])
-            shift_end = timedelta_to_time(schedule['end_time'])
+        for entry in schedules:
+            product_rated_speed = entry['rated_speed']
+            start_dt = entry['start_datetime']
+            device_id = entry['device_id']
+            device_name = entry['device_name']
+            product_id = entry['product_id']
+            product_name = entry['product_name']
+            shift_id = entry['shift_id']
+            shift_name = entry['shift_name']
+            schedule_name =  entry['schedule_name']
             
-            # Create datetime objects for shift boundaries
-            shift_start_dt = datetime.combine(current_date, shift_start)
-            shift_end_dt = datetime.combine(current_date, shift_end)
+            # calculating the total planned time
+            total_planned_time_minutes = (now- start_dt).total_seconds() / 60
+            total_planned_time_minutes = round(total_planned_time_minutes,0) # Round to full min
+
+
+            # calculating the ideal count
+            ideal_sum = total_planned_time_minutes * float(product_rated_speed)
             
-            # Handle overnight shifts
-            if shift_end < shift_start:
-                if current_time < shift_start:
-                    # We're in the early morning, shift started yesterday
-                    shift_start_dt = datetime.combine(current_date - timedelta(days=1), shift_start)
-                else:
-                    # Shift ends tomorrow
-                    shift_end_dt = datetime.combine(current_date + timedelta(days=1), shift_end)
-            
-            # Determine actual calculation period
-            calc_start = shift_start_dt
-            calc_end = min(now, shift_end_dt)  # Don't go beyond current time or shift end
-            
-            # Get device data from shift start until now
+            # calculating the available time and total data
+            # Get data for this schedule time range                 
             cur.execute("""
-                SELECT SUM(device_data) as total_count
-                FROM data 
-                WHERE device_id = %s 
-                AND timestamp >= %s 
-                AND timestamp <= %s
-            """, (schedule['device_id'], calc_start, calc_end))
+            SELECT SUM(device_data) AS total_sum,  COUNT(*) AS total_count_above_zero
+            FROM data
+            WHERE device_id = (%s) AND device_data > 0 AND timestamp BETWEEN %s AND %s
+            """ , (device_id, start_dt, now))
+            data_entries = cur.fetchall()
             
-            result = cur.fetchone()
-            total_count = result['total_count'] if result and result['total_count'] else 0
+            if not data_entries or data_entries[0]['total_sum'] is None or data_entries[0]['total_count_above_zero'] is None:
+                total_sum = 0  # No data at all, zero total sum
+                available_time_minutes = 0  # No data at all, zero available_time
+            else:
+                total_sum = float(data_entries[0]['total_sum']);
+                available_time_minutes = float(data_entries[0]['total_count_above_zero']);
             
-            # Calculate duration in hours for rated count
-            duration = (calc_end - calc_start).total_seconds() / 3600  # hours
-            rated_count = float(schedule['rated_speed']) * duration if duration > 0 else 0
-            
-            # Calculate OEE percentage
-            oee_percentage = (total_count / rated_count * 100) if rated_count > 0 else 0
-            oee_percentage = min(oee_percentage, 100)  # Cap at 100%
+            availability = (available_time_minutes / total_planned_time_minutes) 
+            performance = (total_sum / ideal_sum)
+       
+            oee_percentage = 100 * (performance * availability)
             
             oee_data.append({
-                'device_id': schedule['device_id'],
-                'device_name': schedule['device_name'],
-                'product_name': schedule['product_name'],
-                'oee_percentage': round(oee_percentage, 1),
-                'total_count': int(total_count),
-                'rated_count': int(rated_count),
-                'shift_name': schedule['shift_name']
+                'schedule_name': schedule_name,
+                'device_name': device_name,
+                'product_name': product_name, 
+                'oee_percentage': (round(oee_percentage, 4)),
+                'performance': 100 * (round(performance, 4)), # in %
+                'availability': 100 * (round(availability, 4)), # in %
+                'total_count': total_sum,
+                'rated_count': ideal_sum,
+                'shift_name': shift_name
             })
-        
+            
         return jsonify(oee_data), 200
         
     except Exception as e:
@@ -1132,9 +1392,10 @@ def get_timeseries_data():
         conn = get_company_db(company_id)
         cur = conn.cursor(dictionary=True)
         
+       
         # Calculate date range
-        end_time = datetime.now()
-        start_time = end_time - timedelta(days=days)
+        now = datetime.now()
+        start_time = now - timedelta(2) # 2 days back
         
         # Get devices for this company
         cur.execute("SELECT device_id, device_name FROM devices")
@@ -1142,25 +1403,14 @@ def get_timeseries_data():
         
         timeseries_data = []
         
-        for device in devices:
-            # Get recent device data with rated speed from current schedule
+        for entry in devices:
+            # Get recent device data
             cur.execute("""
-                SELECT 
-                    d.timestamp,
-                    d.device_data,
-                    COALESCE(ps.rated_speed, p.rated_speed) as rated_speed,
-                    dev.device_name
-                FROM data d
-                LEFT JOIN devices dev ON d.device_id = dev.device_id
-                LEFT JOIN production_schedule ps ON d.device_id = ps.device_id 
-                    AND DATE(d.timestamp) = ps.scheduled_date
-                LEFT JOIN products p ON ps.product_id = p.id
-                WHERE d.device_id = %s 
-                AND d.timestamp >= %s 
-                AND d.timestamp <= %s
-                ORDER BY d.timestamp DESC
+                SELECT * FROM data
+                WHERE device_id = (%s) AND timestamp BETWEEN %s AND %s
+                ORDER BY timestamp DESC
                 LIMIT 1000
-            """, (device['device_id'], start_time, end_time))
+            """, (entry['device_id'], start_time, now))
             
             device_data = cur.fetchall()
             
@@ -1168,15 +1418,14 @@ def get_timeseries_data():
                 timeseries_data.append({
                     'timestamp': row['timestamp'].isoformat(),
                     'device_data': row['device_data'],
-                    'rated_speed': row['rated_speed'] if row['rated_speed'] else 0,
-                    'device_name': row['device_name']
+                    'device_name':entry['device_name']
                 })
-        
-        return jsonify(timeseries_data), 200
+            
+        return timeseries_data
         
     except Exception as e:
-        logger.error(f"Error getting timeseries data: {e}")
-        return jsonify({"error": str(e)}), 500
+        #return jsonify({"error": str(e)}), 500
+        print("Error",e)
     finally:
         if 'conn' in locals():
             conn.close()
@@ -1197,118 +1446,43 @@ def get_downtime_data():
     if user['role'] == 'view_only_user' and str(user['company_id']) != company_id:
         return jsonify({"error": "Access denied"}), 403
     
+    calculate_downtime(company_id)
+    
+    # Now as the downtime data is calculated and stored in MYSQL, it's time ro read it.
     try:
         conn = get_company_db(company_id)
         cur = conn.cursor(dictionary=True)
         
-        # Get devices
-        cur.execute("SELECT device_id, device_name FROM devices")
-        devices = cur.fetchall()
+        # Get data      
+        cur.execute("""
+            SELECT pd.*, d.device_name, p.product_name, s.shift_name
+            FROM production_downtime pd
+            JOIN devices d ON pd.device_id = d.device_id
+            JOIN products p ON pd.product_id = p.id
+            JOIN shifts s ON pd.shift_id = s.id
+            ORDER BY pd.device_id, pd.start_datetime
+        """)
+        downtime = cur.fetchall()
         
         downtime_data = []
         
-        # Look back 24 hours for downtime analysis
-        end_time = datetime.now()
-        start_time = end_time - timedelta(hours=24)
-        
-        for device in devices:
-            # Get device data for the last 24 hours
-            cur.execute("""
-                SELECT 
-                    d.timestamp,
-                    d.device_data,
-                    COALESCE(ps.rated_speed, p.rated_speed, 100) as rated_speed
-                FROM data d
-                LEFT JOIN production_schedule ps ON d.device_id = ps.device_id 
-                    AND DATE(d.timestamp) = ps.scheduled_date
-                LEFT JOIN products p ON ps.product_id = p.id
-                WHERE d.device_id = %s 
-                AND d.timestamp >= %s 
-                AND d.timestamp <= %s
-                ORDER BY d.timestamp
-            """, (device['device_id'], start_time, end_time))
-            
-            device_data = cur.fetchall()
-            
-            if not device_data:
-                continue
-            
-            # Analyze for zero production periods
-            zero_start = None
-            below_threshold_start = None
-            
-            for i, row in enumerate(device_data):
-                # Check for zero production
-                if row['device_data'] == 0:
-                    if zero_start is None:
-                        zero_start = row['timestamp']
-                else:
-                    if zero_start is not None:
-                        # End of zero production period
-                        duration = (row['timestamp'] - zero_start).total_seconds() / 60  # minutes
-                        if duration >= 5:  # Only report periods > 5 minutes
-                            downtime_data.append({
-                                'device_id': device['device_id'],
-                                'device_name': device['device_name'],
-                                'start_time': zero_start.isoformat(),
-                                'end_time': row['timestamp'].isoformat(),
-                                'duration_minutes': int(duration),
-                                'type': 'zero_production'
-                            })
-                        zero_start = None
-                
-                # Check for below threshold performance
-                threshold_value = row['rated_speed'] * (threshold / 100)
-                if 0 < row['device_data'] < threshold_value:
-                    if below_threshold_start is None:
-                        below_threshold_start = row['timestamp']
-                else:
-                    if below_threshold_start is not None:
-                        # End of below threshold period
-                        duration = (row['timestamp'] - below_threshold_start).total_seconds() / 60
-                        if duration >= 10:  # Only report periods > 10 minutes
-                            downtime_data.append({
-                                'device_id': device['device_id'],
-                                'device_name': device['device_name'],
-                                'start_time': below_threshold_start.isoformat(),
-                                'end_time': row['timestamp'].isoformat(),
-                                'duration_minutes': int(duration),
-                                'type': 'below_threshold',
-                                'threshold_value': int(threshold_value)
-                            })
-                        below_threshold_start = None
-            
-            # Handle ongoing periods
-            if zero_start is not None:
-                duration = (end_time - zero_start).total_seconds() / 60
-                if duration >= 5:
-                    downtime_data.append({
-                        'device_id': device['device_id'],
-                        'device_name': device['device_name'],
-                        'start_time': zero_start.isoformat(),
-                        'end_time': end_time.isoformat(),
-                        'duration_minutes': int(duration),
-                        'type': 'zero_production'
-                    })
-            
-            if below_threshold_start is not None:
-                duration = (end_time - below_threshold_start).total_seconds() / 60
-                if duration >= 10:
-                    last_rated_speed = device_data[-1]['rated_speed'] if device_data else 100
-                    threshold_value = last_rated_speed * (threshold / 100)
-                    downtime_data.append({
-                        'device_id': device['device_id'],
-                        'device_name': device['device_name'],
-                        'start_time': below_threshold_start.isoformat(),
-                        'end_time': end_time.isoformat(),
-                        'duration_minutes': int(duration),
-                        'type': 'below_threshold',
-                        'threshold_value': int(threshold_value)
-                    })
-        
+        for entry in downtime:
+
+            duration = (entry['end_datetime'] - entry['start_datetime']).total_seconds() / 60  # minutes
+            # Get the data that interest us only
+            downtime_data.append({
+                'shift_name': entry['shift_name'],
+                'product_name': entry['product_name'],
+                'device_name': entry['device_name'],
+                'start_time': entry['start_datetime'],
+                'end_time':  entry['end_datetime'],
+                'duration_minutes': int(duration),
+                'details': entry['comment']
+            })
+                        
         # Sort by start time
         downtime_data.sort(key=lambda x: x['start_time'], reverse=True)
-        
+                                
         return jsonify(downtime_data), 200
         
     except Exception as e:
