@@ -195,6 +195,7 @@ class ApiClient {
   }
 
   async createProductionSchedule(scheduleData: {
+    schedule_name: string;
     device_id: string;
     product_id: number;
     shift_id: number;

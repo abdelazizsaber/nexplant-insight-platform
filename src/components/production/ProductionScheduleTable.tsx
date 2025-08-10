@@ -18,6 +18,10 @@ interface Schedule {
   start_time: string;
   end_time: string;
   rated_speed: number;
+  status?: string;
+  start_datetime?: string;
+  end_datetime?: string;
+  modification_date?: string;
 }
 
 interface ProductionScheduleTableProps {
@@ -81,13 +85,13 @@ export function ProductionScheduleTable({ schedules }: ProductionScheduleTablePr
         {schedules.map((schedule) => (
           <TableRow key={schedule.schedule_id} className={getRowClassName(schedule)}>
 		    <TableCell>{schedule.schedule_name}</TableCell>
-			<TableCell>{schedule.start_datetime}</TableCell>
-			<TableCell>{schedule.end_datetime}</TableCell>
+			<TableCell>{schedule.start_datetime || formatDateTime(schedule.scheduled_date, schedule.start_time)}</TableCell>
+			<TableCell>{schedule.end_datetime || formatDateTime(schedule.scheduled_date, schedule.end_time)}</TableCell>
             <TableCell>{schedule.product_name}</TableCell>
             <TableCell>{schedule.rated_speed} units/min</TableCell>
             <TableCell>{schedule.shift_name}</TableCell>
             <TableCell className="font-medium">{schedule.device_name}</TableCell>
-			<TableCell>{schedule.modification_date}</TableCell>
+			<TableCell>{schedule.modification_date || '-'}</TableCell>
             <TableCell>{getStatusBadge(schedule)}</TableCell>
           </TableRow>
         ))}

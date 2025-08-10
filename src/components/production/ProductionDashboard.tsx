@@ -145,10 +145,22 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Production Dashboard</h2>
-        <Badge variant="outline" className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          Live Data
-        </Badge>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">OEE Display:</label>
+            <select 
+              className="px-3 py-1 border rounded-md text-sm"
+              defaultValue="schedule"
+            >
+              <option value="schedule">Per Schedule</option>
+              <option value="shift">Per Shift</option>
+            </select>
+          </div>
+          <Badge variant="outline" className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            Live Data
+          </Badge>
+        </div>
       </div>
 
       {/* OEE Gauges */}
@@ -232,36 +244,51 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
             ).map(([deviceName, data]) => (
               <div key={deviceName} className="space-y-2">
                 <h4 className="text-lg font-medium">{deviceName}</h4>
-                <div className="h-64">
-                  <ChartContainer
-                    config={{
-                      device_data: {
-                        label: "Actual Data",
-                        color: "#8884d8",
-                      },
-                    }}
-                  >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={data}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="timestamp" 
-                          tickFormatter={(value) => new Date(value).toLocaleTimeString()}
-                        />
-                        <YAxis />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Legend />
-                        <Line 
-                          type="monotone" 
-                          dataKey="device_data" 
-                          stroke="#8884d8" 
-                          strokeWidth={2}
-                          name="Actual Data"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </div>
+                  <div className="h-80 w-full overflow-hidden">
+                    <ChartContainer
+                      config={{
+                        device_data: {
+                          label: "Actual Data",
+                          color: "hsl(var(--primary))",
+                        },
+                      }}
+                    >
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis 
+                            dataKey="timestamp" 
+                            tickFormatter={(value) => {
+                              const date = new Date(value);
+                              const hours = date.getHours();
+                              const minutes = date.getMinutes();
+                              
+                              // Show date at beginning of day (00:00)
+                              if (hours === 0 && minutes === 0) {
+                                return date.toLocaleDateString();
+                              }
+                              
+                              // Show time for other points
+                              return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+                            }}
+                            interval="preserveStartEnd"
+                            minTickGap={50}
+                          />
+                          <YAxis />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="device_data" 
+                            stroke="hsl(var(--primary))" 
+                            strokeWidth={2}
+                            name="Actual Data"
+                            dot={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </ChartContainer>
+                  </div>
               </div>
             ))}
           </div>

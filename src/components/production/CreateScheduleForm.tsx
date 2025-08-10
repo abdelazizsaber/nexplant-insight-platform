@@ -11,6 +11,7 @@ import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const scheduleSchema = z.object({
+  schedule_name: z.string().min(1, "Schedule name is required"),
   device_id: z.string().min(1, "Device is required"),
   product_id: z.number().min(1, "Product is required"),
   shift_id: z.number().min(1, "Shift is required"),
@@ -20,6 +21,7 @@ const scheduleSchema = z.object({
   is_recurring: z.boolean().optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
+  all_shift: z.boolean().optional(),
 }).refine((data) => {
   const [sh, sm] = data.start_time.split(":").map(Number);
   const [eh, em] = data.end_time.split(":").map(Number);
@@ -78,6 +80,7 @@ function timeStringToMinutes(time: string): number {
 export function CreateScheduleForm({ onSuccess, devices, products, shifts }: CreateScheduleFormProps) {
   const [loading, setLoading] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
+  const [allShift, setAllShift] = useState(false);
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const { toast } = useToast();
   
@@ -134,24 +137,26 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
     }
 
     setLoading(true);
-    try {
-      await apiClient.createProductionSchedule({
-        device_id: data.device_id,
-        product_id: data.product_id,
-        shift_id: data.shift_id,
-        scheduled_date: data.scheduled_date,
-        start_time: data.start_time,
-        end_time: data.end_time,
-        is_recurring: isRecurring,
-        start_date: data.start_date,
-        end_date: data.end_date,
-      });
+      try {
+        await apiClient.createProductionSchedule({
+          schedule_name: data.schedule_name,
+          device_id: data.device_id,
+          product_id: data.product_id,
+          shift_id: data.shift_id,
+          scheduled_date: data.scheduled_date,
+          start_time: data.start_time,
+          end_time: data.end_time,
+          is_recurring: isRecurring,
+          start_date: data.start_date,
+          end_date: data.end_date,
+        });
       toast({
         title: "Success",
         description: "Production schedule created successfully",
       });
       reset();
       setIsRecurring(false);
+      setAllShift(false);
       setSelectedShift(null);
       onSuccess();
     } catch (error: any) {
@@ -169,10 +174,36 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
     const shift = shifts.find(s => s.id === parseInt(shiftId));
     setSelectedShift(shift || null);
     setValue("shift_id", parseInt(shiftId));
+    
+    // Auto-fill times if "all shift" is checked
+    if (allShift && shift) {
+      setValue("start_time", shift.start_time);
+      setValue("end_time", shift.end_time);
+    }
+  };
+  
+  const handleAllShiftChange = (checked: boolean) => {
+    setAllShift(checked);
+    if (checked && selectedShift) {
+      setValue("start_time", selectedShift.start_time);
+      setValue("end_time", selectedShift.end_time);
+    }
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="schedule_name">Schedule Name</Label>
+        <Input
+          id="schedule_name"
+          placeholder="Enter unique schedule name"
+          {...register("schedule_name")}
+        />
+        {errors.schedule_name && (
+          <p className="text-sm text-red-500">{errors.schedule_name.message}</p>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="device_id">Device</Label>
@@ -232,16 +263,37 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
         )}
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="scheduled_date">Date</Label>
-        <Input
-          id="scheduled_date"
-          type="date"
-          {...register("scheduled_date")}
+      <div className="flex items-center justify-between">
+        <div className={`space-y-2 flex-1 ${isRecurring ? 'opacity-50' : ''}`}>
+          <Label htmlFor="scheduled_date">Date</Label>
+          <Input
+            id="scheduled_date"
+            type="date"
+            disabled={isRecurring}
+            {...register("scheduled_date")}
+          />
+          {errors.scheduled_date && (
+            <p className="text-sm text-red-500">{errors.scheduled_date.message}</p>
+          )}
+        </div>
+        
+        <div className="flex items-center space-x-2 ml-4">
+          <Checkbox
+            id="is_recurring"
+            checked={isRecurring}
+            onCheckedChange={(checked) => setIsRecurring(checked === true)}
+          />
+          <Label htmlFor="is_recurring">Recurring Schedule</Label>
+        </div>
+      </div>
+
+      <div className="flex items-center space-x-2 mb-4">
+        <Checkbox
+          id="all_shift"
+          checked={allShift}
+          onCheckedChange={(checked) => handleAllShiftChange(checked === true)}
         />
-        {errors.scheduled_date && (
-          <p className="text-sm text-red-500">{errors.scheduled_date.message}</p>
-        )}
+        <Label htmlFor="all_shift">Use entire shift duration</Label>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -250,6 +302,7 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
           <Input
             id="start_time"
             type="time"
+            disabled={allShift}
             {...register("start_time")}
           />
           {selectedShift && (
@@ -267,6 +320,7 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
           <Input
             id="end_time"
             type="time"
+            disabled={allShift}
             {...register("end_time")}
           />
           {errors.end_time && (
@@ -275,14 +329,6 @@ export function CreateScheduleForm({ onSuccess, devices, products, shifts }: Cre
         </div>
       </div>
 
-      <div className="flex items-center space-x-2">
-        <Checkbox
-          id="is_recurring"
-          checked={isRecurring}
-          onCheckedChange={(checked) => setIsRecurring(checked === true)}
-        />
-        <Label htmlFor="is_recurring">Recurring Schedule</Label>
-      </div>
 
       {isRecurring && (
         <div className="grid grid-cols-2 gap-4">
