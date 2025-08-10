@@ -254,8 +254,8 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                       }}
                     >
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted-foreground/20" />
                           <XAxis 
                             dataKey="timestamp" 
                             tickFormatter={(value) => {
@@ -273,9 +273,16 @@ export function ProductionDashboard({ user }: ProductionDashboardProps) {
                             }}
                             interval="preserveStartEnd"
                             minTickGap={50}
-                            className="text-foreground"
+                            tick={{ fontSize: 12, fill: 'hsl(var(--foreground))' }}
+                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tickLine={{ stroke: 'hsl(var(--border))' }}
                           />
-                          <YAxis domain={[0, 'dataMax']} className="text-foreground" />
+                          <YAxis 
+                            domain={[0, 'dataMax + 10']} 
+                            tick={{ fontSize: 12, fill: 'hsl(var(--foreground))' }}
+                            axisLine={{ stroke: 'hsl(var(--border))' }}
+                            tickLine={{ stroke: 'hsl(var(--border))' }}
+                          />
                           <ChartTooltip content={<ChartTooltipContent />} />
                           <Legend />
                           <Line 
